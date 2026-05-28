@@ -2,6 +2,7 @@
   "name": "extrator-imoveis",
   "version": "1.0.0",
   "description": "Sistema de coleta humanizada de imóveis em grupos do Facebook",
+  "author": "Diego Dutra",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -51,21 +52,13 @@
     ],
     "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
+        { "target": "portable", "arch": ["x64"] }
       ],
-      "icon": "electron/icon.ico"
+      "icon": "electron/icon.ico",
+      "forceCodeSigning": false
     },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Extrator de Imóveis"
+    "portable": {
+      "artifactName": "Extrator-de-Imoveis-Portatil.exe"
     }
   },
   "devDependencies": {
