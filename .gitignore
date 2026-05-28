@@ -1,0 +1,31 @@
+# Dependências
+node_modules/
+frontend/node_modules/
+
+# Dados sensíveis e sessões
+.env
+data/sessions/
+data/images/
+data/*.db
+data/*.db-journal
+
+# Build
+dist/
+frontend/dist/
+frontend/dist-electron/
+
+# Prisma
+prisma/migrations/
+
+# Logs e temporários
+*.log
+.DS_Store
+Thumbs.db
+
+# Electron binário (pesado, cada um instala localmente)
+frontend/node_modules/electron/dist/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

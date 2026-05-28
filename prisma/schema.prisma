@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Group {
+  id         String    @id @default(cuid())
+  url        String    @unique
+  name       String?
+  status     String    @default("idle")
+  last_run   DateTime?
+  created_at DateTime  @default(now())
+  posts      Post[]
+
+  @@map("groups")
+}
+
+model Post {
+  id               String    @id @default(cuid())
+  post_id          String    @unique
+  group_id         String
+  group            Group     @relation(fields: [group_id], references: [id])
+  author_name      String?
+  author_profile   String?
+  content          String?
+  content_hash     String?
+
+  // Dados imobiliários extraídos
+  city             String?
+  neighborhood     String?
+  property_type    String?
+  transaction_type String?
+  price            Float?    // SQLite usa Float em vez de Decimal
+  bedrooms         Int?
+  bathrooms        Int?
+  garage           Int?
+  area_m2          Float?
+
+  // Contato
+  phone            String?
+  creci            String?
+
+  // Metadados (image_urls como JSON string — SQLite não tem arrays)
+  image_urls       String?   @default("[]")
+  post_url         String?
+  created_at       DateTime?
+  scraped_at       DateTime  @default(now())
+
+  @@index([group_id])
+  @@index([phone])
+  @@index([content_hash])
+  @@index([city, neighborhood])
+  @@index([property_type, transaction_type])
+  @@index([created_at])
+  @@map("posts")
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  profile_name String    @unique
+  profile_dir  String
+  status       String    @default("idle")
+  last_login   DateTime?
+  created_at   DateTime  @default(now())
+
+  @@map("sessions")
+}
