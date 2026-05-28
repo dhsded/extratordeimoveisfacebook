@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
@@ -15,5 +16,9 @@ export default defineConfig({
         ws: true,
       },
     },
+    watch: {
+      ignored: ['**/dist-electron/**', '**/node_modules/**', '**/.git/**'],
+    },
   },
 })
+
