@@ -10,6 +10,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { useWS } from '../context/WSContext';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { exportXLSX, exportDOC, exportTXT } from '../utils/export.js';
 
 // ─── Cell Renderers ────────────────────────────────────────────────────────────
 
@@ -55,7 +56,6 @@ const DateCell = ({ value }) => {
 
 const PhoneCell = ({ value }) => {
   if (!value) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
-  // Formata: 5511999999999 → (11) 99999-9999
   const d = value.replace(/\D/g, '').replace(/^55/, '');
   const fmt = d.length === 11
     ? `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`
@@ -109,6 +109,71 @@ const COL_DEFS = [
   },
 ];
 
+// ─── Export Dropdown ───────────────────────────────────────────────────────────
+
+function ExportMenu({ rows }) {
+  const [open, setOpen] = useState(false);
+  const ts = format(new Date(), 'yyyyMMdd_HHmm');
+  const name = `imoveis_${ts}`;
+
+  const options = [
+    { label: '📊 Excel (.xlsx)', action: () => exportXLSX(rows, name) },
+    { label: '📝 Word (.doc)',   action: () => exportDOC(rows, name)  },
+    { label: '📄 Texto (.txt)', action: () => exportTXT(rows, name)  },
+  ];
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        id="export-btn"
+        className="btn btn-secondary btn-sm"
+        onClick={() => setOpen(o => !o)}
+        title="Exportar tabela"
+      >
+        ⬇️ Exportar <span style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
+      </button>
+
+      {open && (
+        <>
+          {/* Overlay para fechar */}
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+            onClick={() => setOpen(false)}
+          />
+          <div style={{
+            position: 'absolute', top: '110%', right: 0, zIndex: 100,
+            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-card)',
+            minWidth: 180, overflow: 'hidden',
+          }}>
+            <div style={{ padding: '8px 14px 6px', fontSize: 11, fontWeight: 600,
+              color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em',
+              borderBottom: '1px solid var(--border)' }}>
+              {rows.length.toLocaleString('pt-BR')} registros
+            </div>
+            {options.map(({ label, action }) => (
+              <button
+                key={label}
+                onClick={() => { action(); setOpen(false); }}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '11px 16px', border: 'none', background: 'transparent',
+                  color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer',
+                  fontFamily: 'inherit', transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export default function Posts() {
@@ -125,8 +190,7 @@ export default function Posts() {
   const loadPosts = useCallback(async (extraFilters = {}) => {
     setLoading(true);
     try {
-      const params = { limit: 500, ...filters, ...extraFilters };
-      // Remove params vazios
+      const params = { limit: 1000, ...filters, ...extraFilters };
       Object.keys(params).forEach((k) => { if (!params[k]) delete params[k]; });
       const res = await axios.get('/api/posts', { params });
       setRowData(res.data.data);
@@ -140,7 +204,6 @@ export default function Posts() {
 
   useEffect(() => { loadPosts(); }, []);
 
-  // Adiciona novo post em tempo real
   useEffect(() => {
     const unsub = subscribe((msg) => {
       if (msg.type === 'new_post') {
@@ -156,10 +219,6 @@ export default function Posts() {
     suppressHeaderMenuButton: false,
   }), []);
 
-  const onExportCSV = () => gridRef.current?.api.exportDataAsCsv({
-    fileName: `imoveis_${format(new Date(), 'yyyyMMdd_HHmm')}.csv`,
-  });
-
   return (
     <div className="page fade-in" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="page-header">
@@ -167,10 +226,8 @@ export default function Posts() {
           <div className="page-title">Imóveis Coletados</div>
           <div className="page-subtitle">{total.toLocaleString('pt-BR')} registros encontrados</div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-secondary btn-sm" onClick={onExportCSV}>
-            ⬇️ Exportar CSV
-          </button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <ExportMenu rows={rowData} />
           <button className="btn btn-primary btn-sm" onClick={() => loadPosts()}>
             🔄 Atualizar
           </button>
@@ -212,30 +269,23 @@ export default function Posts() {
           <option value="temporada">Temporada</option>
         </select>
         <input
-          className="input"
-          placeholder="Preço mín."
-          type="number"
+          className="input" placeholder="Preço mín." type="number"
           value={filters.min_price}
           onChange={(e) => setFilters((f) => ({ ...f, min_price: e.target.value }))}
           style={{ width: 120 }}
         />
         <input
-          className="input"
-          placeholder="Preço máx."
-          type="number"
+          className="input" placeholder="Preço máx." type="number"
           value={filters.max_price}
           onChange={(e) => setFilters((f) => ({ ...f, max_price: e.target.value }))}
           style={{ width: 120 }}
         />
-        <button className="btn btn-primary btn-sm" onClick={() => loadPosts()}>
-          Filtrar
-        </button>
+        <button className="btn btn-primary btn-sm" onClick={() => loadPosts()}>Filtrar</button>
         <button className="btn btn-secondary btn-sm" onClick={() => {
-          setFilters({ city:'', property_type:'', transaction_type:'', min_price:'', max_price:'', search:'' });
-          setTimeout(() => loadPosts({ city:'', property_type:'', transaction_type:'', min_price:'', max_price:'', search:'' }), 0);
-        }}>
-          Limpar
-        </button>
+          const empty = { city:'', property_type:'', transaction_type:'', min_price:'', max_price:'', search:'' };
+          setFilters(empty);
+          setTimeout(() => loadPosts(empty), 0);
+        }}>Limpar</button>
       </div>
 
       {/* AG Grid */}

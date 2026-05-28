@@ -82,10 +82,13 @@
     "ag-grid-react": "^35.3.0",
     "axios": "^1.16.1",
     "date-fns": "^4.3.0",
+    "docx": "^9.7.1",
+    "file-saver": "^2.0.5",
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.15.1",
-    "recharts": "^3.8.1"
+    "recharts": "^3.8.1",
+    "xlsx": "^0.18.5"
   }
 }
