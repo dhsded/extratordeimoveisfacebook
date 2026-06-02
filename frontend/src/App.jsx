@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Posts from './pages/Posts';
 import Groups from './pages/Groups';
 import Sessions from './pages/Sessions';
+import Filters from './pages/Filters';
 import { useEffect, useRef } from 'react';
 
 // Listener para navegação via Electron — registrado UMA única vez
@@ -35,6 +36,7 @@ export default function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/posts" element={<Posts />} />
                 <Route path="/groups" element={<Groups />} />
+                <Route path="/filters" element={<Filters />} />
                 <Route path="/sessions" element={<Sessions />} />
               </Routes>
             </main>

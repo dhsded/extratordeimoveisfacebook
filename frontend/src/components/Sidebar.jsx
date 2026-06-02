@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { to: '/',        icon: '📊', label: 'Dashboard', end: true },
   { to: '/posts',   icon: '🏠', label: 'Imóveis' },
   { to: '/groups',  icon: '👥', label: 'Grupos' },
+  { to: '/filters', icon: '🔍', label: 'Filtros' },
   { to: '/sessions',icon: '🔐', label: 'Sessões' },
 ];
 

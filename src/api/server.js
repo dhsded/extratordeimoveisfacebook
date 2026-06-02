@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import postsRouter from './routes/posts.js';
 import groupsRouter from './routes/groups.js';
 import sessionsRouter from './routes/sessions.js';
+import configRouter from './routes/config.js';
 
 const PORT = parseInt(process.env.API_PORT || '3001');
 
@@ -18,6 +19,7 @@ app.use(express.json());
 app.use('/api/posts', postsRouter);
 app.use('/api/groups', groupsRouter);
 app.use('/api/sessions', sessionsRouter);
+app.use('/api/config', configRouter);
 
 // Health check
 app.get('/api/health', (_, res) => res.json({ ok: true, ts: new Date() }));
