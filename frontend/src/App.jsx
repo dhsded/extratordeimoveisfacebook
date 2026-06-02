@@ -6,16 +6,19 @@ import Dashboard from './pages/Dashboard';
 import Posts from './pages/Posts';
 import Groups from './pages/Groups';
 import Sessions from './pages/Sessions';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
-// Listener para navegação via tray do Electron
+// Listener para navegação via Electron — registrado UMA única vez
 function ElectronNavigator() {
   const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate; // sempre atualizado, sem re-registrar
+
   useEffect(() => {
     if (window.electronAPI?.onNavigate) {
-      window.electronAPI.onNavigate((route) => navigate(route));
+      window.electronAPI.onNavigate((route) => navigateRef.current(route));
     }
-  }, [navigate]);
+  }, []); // [] = executa só uma vez, sem acumular listeners
   return null;
 }
 
