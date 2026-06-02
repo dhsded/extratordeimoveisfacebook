@@ -16,14 +16,21 @@ frontend/dist-electron/
 
 # Prisma
 prisma/migrations/
+prisma/data/
 
 # Logs e temporários
 *.log
 .DS_Store
 Thumbs.db
+logs/
 
 # Electron binário (pesado, cada um instala localmente)
 frontend/node_modules/electron/dist/
+
+# Executável portátil e ZIP (binários grandes)
+Extrator-de-Imoveis-Portatil/
+Extrator-de-Imoveis-Portatil.zip
+*.zip
 
 # Python cache
 __pycache__/

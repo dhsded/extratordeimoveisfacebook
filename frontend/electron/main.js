@@ -5,11 +5,12 @@ const { spawn } = require('child_process');
 
 const ROOT_DIR = path.join(__dirname, '..', '..');
 let win = null;
+let appURL = null;
 let backendProcess = null;
 
 // Detecta se usa Vite ou dist — callback chamado UMA ÚNICA VEZ
 function getAppURL(cb) {
-  let done = false; // impede dupla chamada
+  let done = false;
 
   const req = http.get('http://localhost:5173', (res) => {
     res.destroy();
@@ -23,7 +24,6 @@ function getAppURL(cb) {
     }
   });
 
-  // Timeout: se não responder em 2s, usa dist
   setTimeout(() => {
     if (!done) {
       done = true;
@@ -34,6 +34,8 @@ function getAppURL(cb) {
 }
 
 function createWindow(url) {
+  appURL = url;
+
   win = new BrowserWindow({
     width: 1400,
     height: 860,
@@ -52,7 +54,7 @@ function createWindow(url) {
   win.setMenuBarVisibility(false);
   win.loadURL(url);
 
-  // Mostra quando a página estiver pronta
+  // Mostra quando a página carregar
   win.webContents.on('did-finish-load', () => {
     if (!win.isVisible()) {
       win.show();
@@ -60,7 +62,7 @@ function createWindow(url) {
     }
   });
 
-  // Fallback: mostra em 6 segundos de qualquer forma
+  // Fallback: mostra em 6s de qualquer forma
   setTimeout(() => {
     if (win && !win.isDestroyed() && !win.isVisible()) {
       win.show();
@@ -68,9 +70,43 @@ function createWindow(url) {
     }
   }, 6000);
 
+  // ─── IMPEDE NAVEGAÇÃO PARA URLs EXTERNAS ──────────────────────
+  // Qualquer link clicado dentro do app que não seja o localhost/dist
+  // é aberto no browser padrão do sistema, nunca na janela do Electron
+  win.webContents.on('will-navigate', (event, targetUrl) => {
+    const isInternal = targetUrl.startsWith('http://localhost:5173') ||
+                       targetUrl.startsWith('file://') ||
+                       targetUrl === appURL;
+    if (!isInternal) {
+      event.preventDefault();          // bloqueia navegação na janela
+      shell.openExternal(targetUrl);   // abre no browser do sistema
+    }
+  });
+
+  // Links com target="_blank" também vão para o browser externo
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http')) shell.openExternal(url);
+    shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // ─── RECUPERAÇÃO AUTOMÁTICA DE CRASH ──────────────────────────
+  win.webContents.on('render-process-gone', (event, details) => {
+    console.error('[Electron] Renderer caiu:', details.reason);
+    // Recarrega a página em vez de fechar o app
+    setTimeout(() => {
+      if (win && !win.isDestroyed()) {
+        win.reload();
+      }
+    }, 1000);
+  });
+
+  win.webContents.on('unresponsive', () => {
+    console.warn('[Electron] Renderer travado — recarregando...');
+    setTimeout(() => {
+      if (win && !win.isDestroyed()) {
+        win.reload();
+      }
+    }, 3000);
   });
 
   win.on('closed', () => { win = null; });
