@@ -9,53 +9,80 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "electron:dev": "concurrently --kill-others \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
+    "electron:dev": "concurrently --kill-others \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "vite build && electron-builder",
+    "electron:installer": "vite build && electron-builder --win nsis",
+    "electron:portable": "vite build && electron-builder --win portable",
     "electron:start": "electron ."
   },
   "build": {
     "appId": "com.extratorimoveis.app",
-    "productName": "Extrator de Imóveis",
-    "copyright": "Diego Dutra",
+    "productName": "Extrator de Imoveis",
+    "copyright": "Copyright © 2025 Diego Dutra",
+    "asar": true,
     "directories": {
-      "output": "dist-electron"
+      "output": "dist-electron",
+      "buildResources": "electron"
     },
     "files": [
       "dist/**/*",
-      "electron/**/*",
+      "electron/main.js",
+      "electron/preload.js",
+      "electron/icon.ico",
+      "electron/icon.png",
       "!node_modules"
     ],
     "extraResources": [
       {
         "from": "../src",
         "to": "src",
-        "filter": [
-          "**/*"
-        ]
+        "filter": ["**/*.js", "**/*.mjs", "**/*.json", "!**/__tests__/**"]
       },
       {
         "from": "../prisma",
-        "to": "prisma"
-      },
-      {
-        "from": "../.env",
-        "to": ".env"
+        "to": "prisma",
+        "filter": ["schema.prisma", "migrations/**"]
       },
       {
         "from": "../node_modules",
         "to": "node_modules",
         "filter": [
           "**/*",
-          "!**/.bin/**"
+          "!playwright-core/.local-browsers/**",
+          "!playwright/.local-browsers/**",
+          "!@prisma/engines/*.exe",
+          "!@prisma/engines/*.node",
+          "!.cache/**",
+          "!**/test/**",
+          "!**/tests/**",
+          "!**/*.md",
+          "!**/LICENSE",
+          "!**/CHANGELOG*"
         ]
       }
     ],
     "win": {
+      "icon": "electron/icon.ico",
       "target": [
+        { "target": "nsis",     "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
       ],
-      "icon": "electron/icon.ico",
-      "forceCodeSigning": false
+      "forceCodeSigning": false,
+      "signAndEditExecutable": false,
+      "verifyUpdateCodeSignature": false,
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Extrator de Imoveis",
+      "installerIcon": "electron/icon.ico",
+      "uninstallerIcon": "electron/icon.ico",
+      "installerHeaderIcon": "electron/icon.ico",
+      "artifactName": "Extrator-de-Imoveis-Setup-${version}.exe"
     },
     "portable": {
       "artifactName": "Extrator-de-Imoveis-Portatil.exe"

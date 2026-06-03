@@ -3,39 +3,40 @@ const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
 
-const ROOT_DIR = path.join(__dirname, '..', '..');
+// ─── Caminhos ─────────────────────────────────────────────────────────────────
+const IS_PACKAGED = app.isPackaged;
+// Em produção: resources/  |  Em dev: raiz do projeto
+const BACKEND_DIR = IS_PACKAGED
+  ? process.resourcesPath
+  : path.join(__dirname, '..', '..');
+
 let win = null;
-let appURL = null;
 let backendProcess = null;
 
-// Detecta se usa Vite ou dist — callback chamado UMA ÚNICA VEZ
+// ─── URL da Interface ─────────────────────────────────────────────────────────
 function getAppURL(cb) {
-  let done = false;
+  if (IS_PACKAGED) {
+    // Produção: usa o React já compilado em dist/
+    cb('file://' + path.join(__dirname, '..', 'dist', 'index.html'));
+    return;
+  }
 
+  // Dev: tenta Vite em localhost:5173
+  let done = false;
   const req = http.get('http://localhost:5173', (res) => {
     res.destroy();
     if (!done) { done = true; cb('http://localhost:5173'); }
   });
-
   req.on('error', () => {
-    if (!done) {
-      done = true;
-      cb('file://' + path.join(__dirname, '..', 'dist', 'index.html'));
-    }
+    if (!done) { done = true; cb('file://' + path.join(__dirname, '..', 'dist', 'index.html')); }
   });
-
   setTimeout(() => {
-    if (!done) {
-      done = true;
-      req.destroy();
-      cb('file://' + path.join(__dirname, '..', 'dist', 'index.html'));
-    }
+    if (!done) { done = true; req.destroy(); cb('file://' + path.join(__dirname, '..', 'dist', 'index.html')); }
   }, 2000);
 }
 
+// ─── Janela Principal ─────────────────────────────────────────────────────────
 function createWindow(url) {
-  appURL = url;
-
   win = new BrowserWindow({
     width: 1400,
     height: 860,
@@ -43,11 +44,12 @@ function createWindow(url) {
     minHeight: 600,
     title: 'Extrator de Imóveis',
     backgroundColor: '#0a0f1e',
+    icon: path.join(__dirname, 'icon.ico'),
     show: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webviewTag: true,          // permite <webview> no React
+      webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
     },
   });
@@ -55,72 +57,44 @@ function createWindow(url) {
   win.setMenuBarVisibility(false);
   win.loadURL(url);
 
-  // Mostra quando a página carregar
   win.webContents.on('did-finish-load', () => {
-    if (!win.isVisible()) {
-      win.show();
-      win.focus();
-    }
+    if (!win.isVisible()) { win.show(); win.focus(); }
   });
 
-  // Fallback: mostra em 6s de qualquer forma
+  // Fallback: mostra em 8s
   setTimeout(() => {
-    if (win && !win.isDestroyed() && !win.isVisible()) {
-      win.show();
-      win.focus();
-    }
-  }, 6000);
+    if (win && !win.isDestroyed() && !win.isVisible()) { win.show(); win.focus(); }
+  }, 8000);
 
-  // ─── IMPEDE NAVEGAÇÃO PARA URLs EXTERNAS ──────────────────────
-  // Qualquer link clicado dentro do app que não seja o localhost/dist
-  // é aberto no browser padrão do sistema, nunca na janela do Electron
+  // Impede navegação para URLs externas dentro da janela principal
   win.webContents.on('will-navigate', (event, targetUrl) => {
     const isInternal = targetUrl.startsWith('http://localhost:5173') ||
-                       targetUrl.startsWith('file://') ||
-                       targetUrl === appURL;
+                       targetUrl.startsWith('file://');
     if (!isInternal) {
-      event.preventDefault();          // bloqueia navegação na janela
-      shell.openExternal(targetUrl);   // abre no browser do sistema
+      event.preventDefault();
+      shell.openExternal(targetUrl);
     }
   });
 
-  // Links com target="_blank" também vão para o browser externo
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  // ─── RECUPERAÇÃO AUTOMÁTICA DE CRASH ──────────────────────────
-  win.webContents.on('render-process-gone', (event, details) => {
-    console.error('[Electron] Renderer caiu:', details.reason);
-    // Recarrega a página em vez de fechar o app
-    setTimeout(() => {
-      if (win && !win.isDestroyed()) {
-        win.reload();
-      }
-    }, 1000);
+  // Recuperação automática de crash do renderer
+  win.webContents.on('render-process-gone', (_, details) => {
+    if (details.reason !== 'killed') {
+      setTimeout(() => { if (win && !win.isDestroyed()) win.reload(); }, 1500);
+    }
   });
 
-  win.webContents.on('unresponsive', () => {
-    console.warn('[Electron] Renderer travado — recarregando...');
-    setTimeout(() => {
-      if (win && !win.isDestroyed()) {
-        win.reload();
-      }
-    }, 3000);
-  });
-
-  win.on('closed', () => { win = null; });
-
-  // ─── IPC: extrai cookies do Facebook e envia para o backend ───
+  // IPC — cookies do Facebook (webview)
   ipcMain.handle('facebook:getCookies', async () => {
     try {
       const ses = session.fromPartition('persist:facebook');
       const cookies = await ses.cookies.get({ domain: '.facebook.com' });
       return { ok: true, cookies };
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
+    } catch (e) { return { ok: false, error: e.message }; }
   });
 
   ipcMain.handle('facebook:isLoggedIn', async () => {
@@ -128,25 +102,43 @@ function createWindow(url) {
       const ses = session.fromPartition('persist:facebook');
       const cookies = await ses.cookies.get({ domain: '.facebook.com', name: 'c_user' });
       return { loggedIn: cookies.length > 0 };
-    } catch {
-      return { loggedIn: false };
-    }
+    } catch { return { loggedIn: false }; }
   });
+
+  win.on('closed', () => { win = null; });
 }
 
+// ─── Backend ──────────────────────────────────────────────────────────────────
 function startBackend() {
+  const backendScript = path.join(BACKEND_DIR, 'src', 'main.js');
+
+  // Verifica se já está rodando
   const req = http.get('http://localhost:3001/api/health', () => {});
   req.on('error', () => {
-    backendProcess = spawn('node', [path.join(ROOT_DIR, 'src', 'main.js')], {
-      cwd: ROOT_DIR, stdio: 'inherit', shell: true,
+    // Encontra o executável node — em produção usa o node empacotado se disponível
+    const nodeBin = process.platform === 'win32' ? 'node.exe' : 'node';
+
+    backendProcess = spawn(nodeBin, [backendScript], {
+      cwd: BACKEND_DIR,
+      stdio: IS_PACKAGED ? 'ignore' : 'inherit',
+      shell: true,
+      env: { ...process.env, NODE_ENV: 'production' },
+    });
+
+    backendProcess.on('error', (err) => {
+      console.error('[Backend] Falha ao iniciar:', err.message);
     });
   });
   req.setTimeout(2000, () => req.destroy());
 }
 
+// ─── App Lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   startBackend();
-  getAppURL((url) => createWindow(url));
+  // Aguarda 1s para o backend subir antes de abrir a janela
+  setTimeout(() => {
+    getAppURL((url) => createWindow(url));
+  }, IS_PACKAGED ? 2000 : 0);
 });
 
 app.on('window-all-closed', () => {
@@ -154,5 +146,5 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  if (backendProcess) backendProcess.kill();
+  if (backendProcess) { try { backendProcess.kill(); } catch (_) {} }
 });
