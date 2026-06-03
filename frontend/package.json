@@ -39,9 +39,12 @@
         "filter": ["**/*.js", "**/*.mjs", "**/*.json", "!**/__tests__/**"]
       },
       {
-        "from": "../prisma",
-        "to": "prisma",
-        "filter": ["schema.prisma", "migrations/**"]
+        "from": "../prisma/data/imoveis.db",
+        "to": "data/imoveis.db"
+      },
+      {
+        "from": "../package.json",
+        "to": "package.json"
       },
       {
         "from": "../node_modules",
@@ -50,8 +53,7 @@
           "**/*",
           "!playwright-core/.local-browsers/**",
           "!playwright/.local-browsers/**",
-          "!@prisma/engines/*.exe",
-          "!@prisma/engines/*.node",
+          "!@prisma/engines/schema-engine-windows.exe",
           "!.cache/**",
           "!**/test/**",
           "!**/tests/**",

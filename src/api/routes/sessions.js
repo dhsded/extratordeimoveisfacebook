@@ -7,6 +7,9 @@ import path from 'path';
 
 const router = Router();
 
+// Em produção usa AppData (gravável); em dev usa ./data/
+const DATA_DIR = process.env.APP_DATA_DIR || path.resolve('./data');
+
 // Estado global do processo de login em andamento
 let loginProcess = null;
 
@@ -50,7 +53,7 @@ router.post('/cookies', async (req, res) => {
       return res.status(400).json({ error: 'Nenhum cookie fornecido' });
     }
 
-    const sessionDir = './data/sessions/profile1';
+    const sessionDir = path.join(DATA_DIR, 'sessions', 'profile1');
     const cookieFile = path.join(sessionDir, 'cookies.json');
 
     // Garante que a pasta existe
@@ -101,7 +104,7 @@ router.post('/login', async (req, res) => {
     res.write(`data: ${JSON.stringify({ type, msg })}\n\n`);
   };
 
-  const sessionDir = './data/sessions/profile1';
+  const sessionDir = path.join(DATA_DIR, 'sessions', 'profile1');
   const profileName = 'Facebook';
 
   try {

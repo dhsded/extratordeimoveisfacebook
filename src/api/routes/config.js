@@ -3,7 +3,9 @@ import fs from 'fs';
 import path from 'path';
 
 const router = Router();
-const CONFIG_FILE = path.resolve('./data/config.json');
+// Em produção usa AppData (gravável); em dev usa ./data/
+const DATA_DIR = process.env.APP_DATA_DIR || path.resolve('./data');
+const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 const DEFAULT_CONFIG = {
   city: 'Juiz de Fora',
