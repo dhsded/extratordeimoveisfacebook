@@ -6,44 +6,101 @@ const isElectron = !!window.electronAPI;
 // ─── Script injetado no webview para raspar posts ──────────────────────────
 const SCRAPER_SCRIPT = `
 (async () => {
-  // ── Helpers de comportamento humano ─────────────────────────────────────
-  const rand  = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  // ════════════════════════════════════════════════════════════════════════
+  //  Sistema de timing genuinamente humano
+  //  Humanos NÃO têm tempo uniforme entre ações:
+  //   - Distribuição gaussiana (não uniforme)
+  //   - Distrações ocasionais (longas pausas inesperadas)
+  //   - Ritmo de leitura variável (às vezes rápido, às vezes devagar)
+  //   - Scrolls para cima (relendo algo interessante)
+  //   - Cada sessão tem uma "personalidade" (velocidade global)
+  // ════════════════════════════════════════════════════════════════════════
+
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  // Scroll suave que simula leitura humana (acelera, desacelera)
-  const humanScroll = async (distance) => {
-    const steps = rand(6, 14);
-    const stepDist = distance / steps;
-    for (let i = 0; i < steps; i++) {
-      const jitter = rand(-30, 30);
-      window.scrollBy(0, stepDist + jitter);
-      await sleep(rand(40, 120));
-    }
-    // Pausa de "leitura" aleatória
-    await sleep(rand(400, 900));
+  // Distribuição gaussiana (Box-Muller) — muito mais realista que rand()
+  // Humanos tendem a se concentrar em torno de um valor médio com caudas
+  const gaussian = (mean, stdDev) => {
+    let u, v;
+    do {
+      u = Math.random();
+      v = Math.random();
+    } while (u === 0 || v === 0);
+    const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    return Math.max(0, mean + z * stdDev);
   };
 
-  // Clica em um elemento com pequeno delay humano
+  // Cada sessão tem velocidade própria — um usuário "rápido" ou "devagar"
+  const SESSION_PACE = 0.6 + Math.random() * 0.9; // 0.6 = rápido, 1.5 = devagar
+
+  // Delay humano: gaussiano + chance de distração + ritmo da sessão
+  const humanDelay = async (baseMean, baseStdDev, ctx = '') => {
+    let delay = gaussian(baseMean, baseStdDev) * SESSION_PACE;
+
+    // 8% de chance de distração (olhou outra tela, atendeu telefone...)
+    if (Math.random() < 0.08) {
+      delay += gaussian(5000, 2000); // pausa longa inesperada
+    }
+
+    // 5% de chance de "skim" — passou rapidinho (como quando está entediado)
+    if (Math.random() < 0.05) {
+      delay *= 0.25;
+    }
+
+    await sleep(Math.max(50, Math.round(delay)));
+  };
+
+  // Clique humano: hesita, mexe o cursor (mouseover), clica
   const humanClick = async (el) => {
-    await sleep(rand(120, 380));
+    await humanDelay(250, 100, 'pre-click');
     try {
       el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-      await sleep(rand(60, 200));
+      await humanDelay(120, 60, 'hover');
+      // 12% de chance de mover o mouse "ao redor" antes de clicar
+      if (Math.random() < 0.12) {
+        el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        await humanDelay(180, 80, 'adjust');
+      }
       el.click();
     } catch(e) {}
+    await humanDelay(80, 40, 'post-click');
   };
 
+  // Scroll suave com aceleração/desaceleração variável
+  const humanScroll = async (distance) => {
+    const steps = Math.floor(gaussian(9, 3));
+    const clampedSteps = Math.max(4, Math.min(18, steps));
+    const stepDist = distance / clampedSteps;
+
+    for (let i = 0; i < clampedSteps; i++) {
+      // Easing: acelera no início, desacelera no fim (como roda do mouse)
+      const progress = i / clampedSteps;
+      const easing = Math.sin(progress * Math.PI); // 0→1→0
+      const speedFactor = 0.5 + easing * 1.5;
+
+      const jitter = gaussian(0, 25); // variação por passo
+      window.scrollBy(0, (stepDist + jitter) * speedFactor);
+      await sleep(Math.max(20, Math.round(gaussian(70, 30) * SESSION_PACE)));
+    }
+
+    // Pausa de "leitura" após scroll — o quanto o usuário lê antes de continuar
+    await humanDelay(650, 280, 'read-pause');
+  };
+
+  // ── Dados e controle ──────────────────────────────────────────────────────
   const results = [];
   const seen    = new Set();
 
-  // 1. Clica um a um em todos os "Ver Mais" visíveis
+  // 1. Clica Ver Mais — um a um, com timing humano individual
   const clickSeeMore = async () => {
     const btns = Array.from(document.querySelectorAll('[role="button"], [role="link"]'))
       .filter(el => {
         const t = (el.innerText || '').trim().toLowerCase();
         return t === 'ver mais' || t === 'see more' || t === 'ver mais...' || t.endsWith('ver mais');
       });
+
     for (const btn of btns) {
+      // Cada botão tem seu próprio timing (não é previsível)
       await humanClick(btn);
     }
     return btns.length;
@@ -75,8 +132,6 @@ const SCRAPER_SCRIPT = `
           .filter(a => a.href && a.href.includes('facebook.com')
                     && !a.href.includes('/groups/')
                     && !a.href.includes('/posts/'));
-        const authorName    = authorLinks[0]?.innerText?.trim() || '';
-        const authorProfile = authorLinks[0]?.href || '';
 
         const imgs = Array.from(art.querySelectorAll('img'))
           .map(i => i.src)
@@ -85,8 +140,8 @@ const SCRAPER_SCRIPT = `
         batch.push({
           post_id:        postId,
           content:        text.substring(0, 6000),
-          author_name:    authorName,
-          author_profile: authorProfile,
+          author_name:    authorLinks[0]?.innerText?.trim() || '',
+          author_profile: authorLinks[0]?.href || '',
           post_url:       postUrl,
           image_urls:     JSON.stringify(imgs.slice(0, 8)),
         });
@@ -95,29 +150,37 @@ const SCRAPER_SCRIPT = `
     return batch;
   };
 
-  // 3. Loop principal: clicar Ver Mais → extrair → scroll humano
-  let scrolls    = 0;
+  // 3. Loop principal — comportamento de leitura real
   const MAX_SCROLLS = 25;
+  let scrolls = 0;
 
-  // Pausa inicial — simula o usuário chegando na página
-  await sleep(rand(800, 1800));
+  // Pausa inicial — simula o usuário orientando na página (tempo variável!)
+  await humanDelay(1400, 600, 'page-load');
 
   while (scrolls < MAX_SCROLLS) {
+    // Expande textos
     await clickSeeMore();
-    await sleep(rand(900, 1600)); // aguarda expansão dos textos
+    await humanDelay(1200, 400, 'after-expand'); // aguarda renderização
 
+    // Extrai
     const batch = extractPosts();
     batch.forEach(p => results.push(p));
     window.__scraperProgress = { scrolls, total: results.length };
 
     if (window.__scraperStop) break;
 
-    // Scroll com distância variável — simula leitura
-    const scrollDist = window.innerHeight * (1.5 + Math.random() * 1.5);
-    await humanScroll(scrollDist);
+    // 15% de chance de scroll para CIMA (releitura — comportamento humano)
+    if (Math.random() < 0.15) {
+      await humanScroll(-(gaussian(300, 100)));
+      await humanDelay(800, 400, 'backscroll-read');
+    }
 
-    // Pausa entre scrolls — varia como humano lendo
-    await sleep(rand(1200, 2800));
+    // Scroll para baixo com distância variável
+    const scrollDist = window.innerHeight * gaussian(1.8, 0.6);
+    await humanScroll(Math.max(200, scrollDist));
+
+    // Pausa entre scrolls com distribuição realista
+    await humanDelay(1800, 700, 'between-scrolls');
     scrolls++;
   }
 
