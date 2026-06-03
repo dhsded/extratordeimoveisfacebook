@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, session } = require('electron');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
@@ -47,6 +47,7 @@ function createWindow(url) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webviewTag: true,          // permite <webview> no React
       preload: path.join(__dirname, 'preload.js'),
     },
   });
@@ -110,6 +111,27 @@ function createWindow(url) {
   });
 
   win.on('closed', () => { win = null; });
+
+  // ─── IPC: extrai cookies do Facebook e envia para o backend ───
+  ipcMain.handle('facebook:getCookies', async () => {
+    try {
+      const ses = session.fromPartition('persist:facebook');
+      const cookies = await ses.cookies.get({ domain: '.facebook.com' });
+      return { ok: true, cookies };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('facebook:isLoggedIn', async () => {
+    try {
+      const ses = session.fromPartition('persist:facebook');
+      const cookies = await ses.cookies.get({ domain: '.facebook.com', name: 'c_user' });
+      return { loggedIn: cookies.length > 0 };
+    } catch {
+      return { loggedIn: false };
+    }
+  });
 }
 
 function startBackend() {

@@ -3,11 +3,12 @@ import { useWS } from '../context/WSContext';
 import { useTheme } from '../context/ThemeContext';
 
 const NAV_ITEMS = [
-  { to: '/',        icon: '📊', label: 'Dashboard', end: true },
-  { to: '/posts',   icon: '🏠', label: 'Imóveis' },
-  { to: '/groups',  icon: '👥', label: 'Grupos' },
-  { to: '/filters', icon: '🔍', label: 'Filtros' },
-  { to: '/sessions',icon: '🔐', label: 'Sessões' },
+  { to: '/',         icon: '📊', label: 'Dashboard',  end: true },
+  { to: '/posts',    icon: '🏠', label: 'Imóveis' },
+  { to: '/groups',   icon: '👥', label: 'Grupos' },
+  { to: '/facebook', icon: '🌐', label: 'Facebook' },
+  { to: '/filters',  icon: '🔍', label: 'Filtros' },
+  { to: '/sessions', icon: '🔐', label: 'Sessões' },
 ];
 
 export default function Sidebar() {

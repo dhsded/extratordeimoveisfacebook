@@ -1,11 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Expõe API segura para o renderer (React)
-// onNavigate registra o callback UMA vez (remove o anterior se existir)
 contextBridge.exposeInMainWorld('electronAPI', {
   onNavigate: (callback) => {
-    ipcRenderer.removeAllListeners('navigate'); // evita acúmulo de listeners
+    ipcRenderer.removeAllListeners('navigate');
     ipcRenderer.on('navigate', (_, route) => callback(route));
+  },
+  // Facebook webview helpers
+  facebook: {
+    getCookies:  () => ipcRenderer.invoke('facebook:getCookies'),
+    isLoggedIn:  () => ipcRenderer.invoke('facebook:isLoggedIn'),
   },
   platform: process.platform,
   versions: {

@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { prisma } from '../../db/client.js';
 import { launchBrowser, newPage } from '../../browser/launcher.js';
 import { isAuthenticated, updateSessionStatus } from '../../browser/session.js';
+import fs from 'fs';
+import path from 'path';
 
 const router = Router();
 
@@ -32,6 +34,48 @@ router.get('/status', async (req, res) => {
       orderBy: { last_login: 'desc' },
     });
     res.json({ loggedIn: !!active, session: active });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/sessions/cookies — Salva cookies da webview para uso no Playwright
+ * Body: { cookies: [...] }
+ */
+router.post('/cookies', async (req, res) => {
+  try {
+    const { cookies } = req.body;
+    if (!Array.isArray(cookies) || cookies.length === 0) {
+      return res.status(400).json({ error: 'Nenhum cookie fornecido' });
+    }
+
+    const sessionDir = './data/sessions/profile1';
+    const cookieFile = path.join(sessionDir, 'cookies.json');
+
+    // Garante que a pasta existe
+    if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+
+    // Converte formato Electron → Playwright
+    const playwrightCookies = cookies.map(c => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path || '/',
+      expires: c.expirationDate || -1,
+      httpOnly: c.httpOnly || false,
+      secure: c.secure || false,
+      sameSite: c.sameSite === 'no_restriction' ? 'None'
+              : c.sameSite === 'lax' ? 'Lax'
+              : c.sameSite === 'strict' ? 'Strict' : 'Lax',
+    }));
+
+    fs.writeFileSync(cookieFile, JSON.stringify(playwrightCookies, null, 2));
+
+    // Marca sessão como ativa no banco
+    await updateSessionStatus('Facebook', sessionDir, 'active');
+
+    res.json({ message: `${cookies.length} cookies salvos! Extrator pronto para usar.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
