@@ -6,18 +6,46 @@ const isElectron = !!window.electronAPI;
 // ─── Script injetado no webview para raspar posts ──────────────────────────
 const SCRAPER_SCRIPT = `
 (async () => {
+  // ── Helpers de comportamento humano ─────────────────────────────────────
+  const rand  = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const results = [];
-  const seen = new Set();
 
-  // 1. Clica em todos os botões "Ver mais" visíveis
-  const clickSeeMore = () => {
+  // Scroll suave que simula leitura humana (acelera, desacelera)
+  const humanScroll = async (distance) => {
+    const steps = rand(6, 14);
+    const stepDist = distance / steps;
+    for (let i = 0; i < steps; i++) {
+      const jitter = rand(-30, 30);
+      window.scrollBy(0, stepDist + jitter);
+      await sleep(rand(40, 120));
+    }
+    // Pausa de "leitura" aleatória
+    await sleep(rand(400, 900));
+  };
+
+  // Clica em um elemento com pequeno delay humano
+  const humanClick = async (el) => {
+    await sleep(rand(120, 380));
+    try {
+      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      await sleep(rand(60, 200));
+      el.click();
+    } catch(e) {}
+  };
+
+  const results = [];
+  const seen    = new Set();
+
+  // 1. Clica um a um em todos os "Ver Mais" visíveis
+  const clickSeeMore = async () => {
     const btns = Array.from(document.querySelectorAll('[role="button"], [role="link"]'))
       .filter(el => {
         const t = (el.innerText || '').trim().toLowerCase();
-        return t === 'ver mais' || t === 'see more' || t === 'ver mais...' || t === '...ver mais';
+        return t === 'ver mais' || t === 'see more' || t === 'ver mais...' || t.endsWith('ver mais');
       });
-    btns.forEach(btn => { try { btn.click(); } catch(e) {} });
+    for (const btn of btns) {
+      await humanClick(btn);
+    }
     return btns.length;
   };
 
@@ -25,69 +53,72 @@ const SCRAPER_SCRIPT = `
   const extractPosts = () => {
     const articles = Array.from(document.querySelectorAll('[role="article"]'));
     const batch = [];
-
     for (const art of articles) {
       try {
-        // Texto do post
-        const textEls = art.querySelectorAll('[data-ad-comet-preview="message"], [data-ad-preview="message"]');
+        const textEls = art.querySelectorAll(
+          '[data-ad-comet-preview="message"], [data-ad-preview="message"]'
+        );
         let text = textEls.length > 0
           ? Array.from(textEls).map(e => e.innerText).join('\\n')
           : art.innerText;
         if (!text || text.length < 15) continue;
 
-        // Link do post (para ID único)
         const postLink = art.querySelector(
           'a[href*="/posts/"], a[href*="story_fbid="], a[href*="/permalink/"], a[href*="?__story_fbid"]'
         );
         const postUrl = postLink ? postLink.href : '';
-        const postId  = (postUrl.match(/\\d{12,}/) || [Date.now().toString()])[0];
+        const postId  = (postUrl.match(/\\d{12,}/) || [Date.now().toString() + Math.random()])[0];
         if (seen.has(postId)) continue;
         seen.add(postId);
 
-        // Autor
         const authorLinks = Array.from(art.querySelectorAll('a[role="link"]'))
-          .filter(a => a.href && a.href.includes('facebook.com') && !a.href.includes('/groups/') && !a.href.includes('/posts/'));
+          .filter(a => a.href && a.href.includes('facebook.com')
+                    && !a.href.includes('/groups/')
+                    && !a.href.includes('/posts/'));
         const authorName    = authorLinks[0]?.innerText?.trim() || '';
         const authorProfile = authorLinks[0]?.href || '';
 
-        // Imagens
         const imgs = Array.from(art.querySelectorAll('img'))
           .map(i => i.src)
           .filter(s => s && s.includes('fbcdn') && !s.includes('emoji') && !s.includes('avatar'));
 
         batch.push({
-          post_id: postId,
-          content: text.substring(0, 6000),
-          author_name: authorName,
+          post_id:        postId,
+          content:        text.substring(0, 6000),
+          author_name:    authorName,
           author_profile: authorProfile,
-          post_url: postUrl,
-          image_urls: JSON.stringify(imgs.slice(0, 8)),
+          post_url:       postUrl,
+          image_urls:     JSON.stringify(imgs.slice(0, 8)),
         });
       } catch(e) {}
     }
     return batch;
   };
 
-  // 3. Loop: clica Ver Mais → extrai → rola
-  let scrolls = 0;
-  const MAX_SCROLLS = 30;
+  // 3. Loop principal: clicar Ver Mais → extrair → scroll humano
+  let scrolls    = 0;
+  const MAX_SCROLLS = 25;
+
+  // Pausa inicial — simula o usuário chegando na página
+  await sleep(rand(800, 1800));
 
   while (scrolls < MAX_SCROLLS) {
-    clickSeeMore();
-    await sleep(1200);
-    clickSeeMore(); // segunda passagem após expansão
-    await sleep(600);
+    await clickSeeMore();
+    await sleep(rand(900, 1600)); // aguarda expansão dos textos
 
     const batch = extractPosts();
     batch.forEach(p => results.push(p));
-
     window.__scraperProgress = { scrolls, total: results.length };
 
-    window.scrollBy(0, window.innerHeight * 2.5);
-    await sleep(2500);
-    scrolls++;
-
     if (window.__scraperStop) break;
+
+    // Scroll com distância variável — simula leitura
+    const scrollDist = window.innerHeight * (1.5 + Math.random() * 1.5);
+    await humanScroll(scrollDist);
+
+    // Pausa entre scrolls — varia como humano lendo
+    await sleep(rand(1200, 2800));
+    scrolls++;
   }
 
   return results;
