@@ -75,7 +75,7 @@ router.post('/login', async (req, res) => {
 
     send('✅ Navegador aberto! Faça seu login no Facebook na janela que apareceu.', 'waiting');
 
-    // Aguarda até 5 minutos pelo login
+    // Aguarda até 5 minutos pelo login — verifica APENAS a URL, sem recarregar nada
     let authenticated = false;
     const start = Date.now();
     const TIMEOUT = 5 * 60 * 1000; // 5 minutos
@@ -83,26 +83,30 @@ router.post('/login', async (req, res) => {
     while (Date.now() - start < TIMEOUT) {
       await new Promise(r => setTimeout(r, 3000));
 
+      // Verifica se a janela ainda existe
       try {
-        authenticated = await isAuthenticated(page);
-      } catch {
-        authenticated = false;
-      }
+        const currentUrl = page.url();
 
-      if (authenticated) break;
+        // URLs que indicam login bem-sucedido (não é mais a tela de login)
+        const isLoginPage = currentUrl.includes('/login') ||
+                            currentUrl.includes('/checkpoint') ||
+                            currentUrl.includes('/recover') ||
+                            currentUrl === 'about:blank';
 
-      // Verifica se a página ainda existe (usuário pode ter fechado o browser)
-      try {
-        await page.title();
+        if (!isLoginPage && currentUrl.includes('facebook.com')) {
+          authenticated = true;
+          break;
+        }
       } catch {
+        // Janela foi fechada pelo usuário
         send('Navegador fechado antes do login.', 'error');
         break;
       }
 
-      const elapsed = Math.floor((Date.now() - start) / 1000);
       const remaining = Math.floor((TIMEOUT - (Date.now() - start)) / 1000);
-      send(`Aguardando login... (${remaining}s restantes)`, 'waiting');
+      send(`Aguardando você fazer login... (${remaining}s restantes)`, 'waiting');
     }
+
 
     if (authenticated) {
       await updateSessionStatus(profileName, sessionDir, 'active');
