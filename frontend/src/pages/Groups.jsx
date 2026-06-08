@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useWS } from '../context/WSContext';
 import { format } from 'date-fns';
@@ -30,6 +31,7 @@ export default function Groups() {
   const [statusMessages, setStatusMessages] = useState({});
   const { subscribe } = useWS();
   const toast = useToast();
+  const navigate = useNavigate();
 
   const loadGroups = async () => {
     try {
@@ -68,12 +70,11 @@ export default function Groups() {
   const handleAddGroup = async (e) => {
     e.preventDefault();
     if (!url.trim()) return;
-
     setSubmitting(true);
     try {
-      const res = await axios.post('/api/groups', { url: url.trim() });
+      await axios.post('/api/groups', { url: url.trim() });
       setUrl('');
-      toast.success('Grupo adicionado! Coleta iniciada 🚀');
+      toast.success('Grupo salvo! Abra-o na aba Facebook para coletar.');
       await loadGroups();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erro ao adicionar grupo');
@@ -82,14 +83,10 @@ export default function Groups() {
     }
   };
 
-  const handleRun = async (groupId) => {
-    try {
-      await axios.post(`/api/groups/${groupId}/run`);
-      toast.info('Coleta iniciada!');
-      setGroups((prev) => prev.map((g) => g.id === groupId ? { ...g, status: 'running' } : g));
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Erro ao iniciar coleta');
-    }
+  // Abre o grupo diretamente na aba Facebook (webview) para coleta
+  const handleOpenInFacebook = (groupUrl) => {
+    sessionStorage.setItem('fb_open_url', groupUrl);
+    navigate('/facebook');
   };
 
   const handleDelete = async (groupId) => {
@@ -133,17 +130,17 @@ export default function Groups() {
               />
             </div>
             <button
-              id="btn-run-group"
+              id="btn-add-group"
               type="submit"
               className="btn btn-primary btn-lg"
               disabled={submitting || !url}
             >
-              {submitting ? '⏳ Adicionando...' : '🚀 Executar'}
+              {submitting ? '⏳ Salvando...' : '➕ Salvar Grupo'}
             </button>
           </div>
         </form>
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
-          💡 O browser abrirá em modo visível para simular navegação humana. Certifique-se de ter feito login primeiro (<code>npm run login</code>).
+          💡 Após salvar, clique em <strong>"🌐 Abrir e Coletar"</strong> para abrir o grupo na aba Facebook e iniciar a extração.
         </div>
       </div>
 
@@ -200,11 +197,11 @@ export default function Groups() {
                 <div className="group-card-actions">
                   <button
                     className="btn btn-primary btn-sm"
-                    onClick={() => handleRun(group.id)}
-                    disabled={group.status === 'running'}
+                    onClick={() => handleOpenInFacebook(group.url)}
                     style={{ flex: 1 }}
+                    title="Abre este grupo na aba Facebook para coletar"
                   >
-                    {group.status === 'running' ? '⏳ Coletando...' : '▶️ Executar'}
+                    🌐 Abrir e Coletar
                   </button>
                   <button
                     className="btn btn-danger btn-sm"

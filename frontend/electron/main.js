@@ -4,7 +4,24 @@ const http = require('http');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
-// ─── Flags para manter coleta ativa mesmo em segundo plano ───────────────────
+// ─── Log em arquivo para capturar crashes ─────────────────────────────────────
+const LOG_DIR  = path.join(app.getPath('userData'), '..', 'Extrator de Imoveis - Logs');
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+const LOG_FILE = path.join(LOG_DIR, 'electron.log');
+const log = (...args) => {
+  const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
+  process.stdout.write(line);
+  try { fs.appendFileSync(LOG_FILE, line); } catch (_) {}
+};
+
+process.on('uncaughtException',      err => log('CRASH uncaughtException:', err.stack || err));
+process.on('unhandledRejection',     err => log('CRASH unhandledRejection:', err));
+
+log('=== Electron iniciando ===');
+log('IS_PACKAGED:', app.isPackaged);
+log('Electron:', process.versions.electron);
+
+// ─── Flags para coleta em segundo plano ──────────────────────────────────────
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 
@@ -17,11 +34,12 @@ const BACKEND_DIR = IS_PACKAGED
 let win = null;
 let backendProcess = null;
 
-// ─── Prepara pasta de dados do usuário ───────────────────────────────────────
+// ─── Dados do usuário ─────────────────────────────────────────────────────────
 function prepareUserData() {
   const userData = app.getPath('userData');
-  const dirs = [userData, path.join(userData, 'sessions', 'profile1')];
-  dirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+  [userData, path.join(userData, 'sessions', 'profile1')].forEach(d => {
+    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+  });
 
   const dbDest = path.join(userData, 'imoveis.db');
   if (!fs.existsSync(dbDest)) {
@@ -33,24 +51,29 @@ function prepareUserData() {
   return userData;
 }
 
-// ─── URL da Interface ─────────────────────────────────────────────────────────
+// ─── URL da interface ─────────────────────────────────────────────────────────
 function getAppURL(cb) {
   if (IS_PACKAGED) {
     cb('file://' + path.join(__dirname, '..', 'dist', 'index.html'));
     return;
   }
+  let done = false;
   const req = http.get('http://localhost:5173', (res) => {
     res.destroy();
-    cb('http://localhost:5173');
+    if (!done) { done = true; log('URL: localhost:5173'); cb('http://localhost:5173'); }
   });
   req.on('error', () => {
-    cb('file://' + path.join(__dirname, '..', 'dist', 'index.html'));
+    if (!done) { done = true; log('URL fallback: dist/index.html'); cb('file://' + path.join(__dirname, '..', 'dist', 'index.html')); }
   });
-  req.setTimeout(2000, () => { req.destroy(); });
+  setTimeout(() => {
+    if (!done) { done = true; req.destroy(); log('URL timeout fallback'); cb('http://localhost:5173'); }
+  }, 3000);
 }
 
-// ─── Janela Principal ─────────────────────────────────────────────────────────
+// ─── Janela ───────────────────────────────────────────────────────────────────
 function createWindow(url) {
+  log('createWindow:', url);
+
   win = new BrowserWindow({
     width: 1400,
     height: 860,
@@ -64,31 +87,45 @@ function createWindow(url) {
       nodeIntegration: false,
       contextIsolation: true,
       webviewTag: true,
-      backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js'),
     },
   });
 
   win.setMenuBarVisibility(false);
-  win.loadURL(url);
+  win.loadURL(url).catch(err => log('loadURL error:', err.message));
 
   win.webContents.on('did-finish-load', () => {
+    log('did-finish-load OK');
     win.webContents.setBackgroundThrottling(false);
-    if (!win.isVisible()) { win.show(); win.focus(); }
+    if (win && !win.isVisible()) { win.show(); win.focus(); }
+    // Abre DevTools para capturar erros do renderer
+    if (!IS_PACKAGED) win.webContents.openDevTools({ mode: 'detach' });
   });
 
-  // Fallback: mostra a janela após 8s caso did-finish-load não dispare
+  // Captura erros do console do renderer
+  win.webContents.on('console-message', (e, level, msg, line, src) => {
+    if (level >= 2) log(`RENDERER [L${level}] ${msg} (${src}:${line})`);
+  });
+
+  win.webContents.on('did-fail-load', (e, code, desc) => {
+    log('did-fail-load:', code, desc);
+  });
+
+  win.webContents.on('render-process-gone', (_, details) => {
+    log('render-process-gone:', details.reason, details.exitCode);
+    if (details.reason !== 'killed' && details.reason !== 'clean-exit') {
+      setTimeout(() => { if (win && !win.isDestroyed()) { log('Recarregando...'); win.reload(); } }, 2000);
+    }
+  });
+
+  // Fallback show
   setTimeout(() => {
     if (win && !win.isDestroyed() && !win.isVisible()) { win.show(); win.focus(); }
   }, 8000);
 
   win.webContents.on('will-navigate', (event, targetUrl) => {
-    const isInternal = targetUrl.startsWith('http://localhost:5173') ||
-                       targetUrl.startsWith('file://');
-    if (!isInternal) {
-      event.preventDefault();
-      shell.openExternal(targetUrl);
-    }
+    const ok = targetUrl.startsWith('http://localhost:5173') || targetUrl.startsWith('file://');
+    if (!ok) { event.preventDefault(); shell.openExternal(targetUrl); }
   });
 
   win.webContents.setWindowOpenHandler(({ url: u }) => {
@@ -96,17 +133,15 @@ function createWindow(url) {
     return { action: 'deny' };
   });
 
-  win.on('closed', () => { win = null; });
+  win.on('closed', () => { log('Janela fechada'); win = null; });
 }
 
-// ─── Backend ──────────────────────────────────────────────────────────────────
+// ─── Backend (apenas em produção) ─────────────────────────────────────────────
 function startBackend(userData) {
-  // Em DEV: backend já roda externamente (Iniciar.bat / node src/main.js)
-  if (!IS_PACKAGED) return;
+  if (!IS_PACKAGED) { log('DEV: backend externo, nao iniciando'); return; }
 
   const backendScript = path.join(process.resourcesPath, 'src', 'main.js');
   const dbPath        = path.join(userData, 'imoveis.db');
-  const sessionsDir   = path.join(userData, 'sessions', 'profile1');
 
   backendProcess = spawn(process.execPath, [backendScript], {
     cwd: process.resourcesPath,
@@ -117,24 +152,25 @@ function startBackend(userData) {
       NODE_ENV: 'production',
       APP_DATA_DIR: userData,
       DATABASE_URL: `file:${dbPath}`,
-      FB_SESSION_DIR: sessionsDir,
+      FB_SESSION_DIR: path.join(userData, 'sessions', 'profile1'),
       API_PORT: '3001',
     },
     stdio: 'pipe',
     shell: false,
   });
 
-  backendProcess.stderr?.on('data', d => console.error('[Backend]', d.toString()));
-  backendProcess.on('error', err => console.error('[Backend] Erro:', err.message));
-  backendProcess.on('exit', code => { if (code !== 0) console.error('[Backend] Saiu:', code); });
+  backendProcess.stderr?.on('data', d => log('[Backend stderr]', d.toString().trim()));
+  backendProcess.on('error', err => log('[Backend] erro:', err.message));
+  backendProcess.on('exit', code => log('[Backend] saiu:', code));
 }
 
 // ─── App Lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+  log('app.whenReady');
   const userData = prepareUserData();
   startBackend(userData);
 
-  // ── IPC: Facebook cookies ──────────────────────────────────────────────────
+  // IPC: Facebook
   ipcMain.removeHandler('facebook:getCookies');
   ipcMain.handle('facebook:getCookies', async () => {
     try {
@@ -153,32 +189,28 @@ app.whenReady().then(() => {
     } catch { return { loggedIn: false }; }
   });
 
-  // ── IPC: controle de coleta em segundo plano ───────────────────────────────
-  let psBlockerId = null;
+  // IPC: coleta em segundo plano
+  let psId = null;
   ipcMain.removeHandler('scraping:start');
   ipcMain.handle('scraping:start', () => {
-    if (!psBlockerId) psBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    if (!psId) psId = powerSaveBlocker.start('prevent-app-suspension');
     return { ok: true };
   });
   ipcMain.removeHandler('scraping:stop');
   ipcMain.handle('scraping:stop', () => {
-    if (psBlockerId !== null) { powerSaveBlocker.stop(psBlockerId); psBlockerId = null; }
+    if (psId !== null) { powerSaveBlocker.stop(psId); psId = null; }
     return { ok: true };
   });
 
-  // Abre a janela
   const delay = IS_PACKAGED ? 3000 : 0;
-  setTimeout(() => {
-    getAppURL((url) => createWindow(url));
-  }, delay);
-});
+  setTimeout(() => getAppURL(url => createWindow(url)), delay);
+}).catch(err => log('whenReady ERRO:', err));
 
 app.on('window-all-closed', () => {
+  log('window-all-closed');
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
-  if (backendProcess) {
-    try { backendProcess.kill('SIGTERM'); } catch (_) {}
-  }
+  if (backendProcess) { try { backendProcess.kill('SIGTERM'); } catch (_) {} }
 });

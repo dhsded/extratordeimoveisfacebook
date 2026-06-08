@@ -197,7 +197,14 @@ export default function FacebookBrowser() {
   const logEndRef   = useRef(null);
   const scrapingRef = useRef(false);
 
-  const [url, setUrl]               = useState('https://www.facebook.com');
+  // Lê URL enviada pela página de Grupos (via sessionStorage)
+  const initialUrl = (() => {
+    const saved = sessionStorage.getItem('fb_open_url');
+    if (saved) { sessionStorage.removeItem('fb_open_url'); return saved; }
+    return 'https://www.facebook.com';
+  })();
+
+  const [url, setUrl]               = useState(initialUrl);
   const [currentUrl, setCurrentUrl] = useState('');
   const [loading, setLoading]       = useState(true);
   const [loggedIn, setLoggedIn]     = useState(false);
@@ -450,7 +457,7 @@ export default function FacebookBrowser() {
         {isElectron ? (
           <webview
             ref={webviewRef}
-            src="https://www.facebook.com"
+            src={initialUrl}
             partition="persist:facebook"
             style={{ flex: 1, border: 'none', minWidth: 0 }}
             useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
