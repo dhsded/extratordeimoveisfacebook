@@ -22,7 +22,6 @@ log('IS_PACKAGED:', app.isPackaged);
 log('Electron:', process.versions.electron);
 
 // ─── Flags de estabilidade ────────────────────────────────────────────────────
-app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-dev-shm-usage');
@@ -35,6 +34,7 @@ const BACKEND_DIR = IS_PACKAGED
 
 let win = null;
 let backendProcess = null;
+let facebookWin = null;
 
 // ─── Dados do usuário ─────────────────────────────────────────────────────────
 function prepareUserData() {
@@ -135,7 +135,14 @@ function createWindow(url) {
     return { action: 'deny' };
   });
 
-  win.on('closed', () => { log('Janela fechada'); win = null; });
+  win.on('closed', () => {
+    log('Janela fechada');
+    win = null;
+    if (facebookWin && !facebookWin.isDestroyed()) {
+      try { facebookWin.close(); } catch (_) {}
+      facebookWin = null;
+    }
+  });
 }
 
 // ─── Backend (apenas em produção) ─────────────────────────────────────────────
@@ -189,6 +196,122 @@ app.whenReady().then(() => {
       const cookies = await ses.cookies.get({ domain: '.facebook.com', name: 'c_user' });
       return { loggedIn: cookies.length > 0 };
     } catch { return { loggedIn: false }; }
+  });
+
+  // IPC: Facebook - Janela nativa secundária
+  ipcMain.removeHandler('facebook:open');
+  ipcMain.handle('facebook:open', async (_, startUrl) => {
+    log('facebook:open com URL:', startUrl);
+    if (facebookWin && !facebookWin.isDestroyed()) {
+      facebookWin.focus();
+      return { ok: true };
+    }
+
+    facebookWin = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      title: 'Navegador Facebook - Extrator de Imóveis',
+      backgroundColor: '#1877f2',
+      parent: win || undefined,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:facebook',
+      },
+    });
+
+    facebookWin.setMenuBarVisibility(false);
+    
+    facebookWin.loadURL(startUrl || 'https://www.facebook.com', {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+    });
+
+    facebookWin.webContents.on('did-navigate', (event, url) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('facebook:on-navigate', url);
+      }
+    });
+
+    facebookWin.webContents.on('did-navigate-in-page', (event, url) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('facebook:on-navigate', url);
+      }
+    });
+
+    facebookWin.on('closed', () => {
+      facebookWin = null;
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('facebook:on-closed');
+      }
+    });
+
+    return { ok: true };
+  });
+
+  ipcMain.removeHandler('facebook:close');
+  ipcMain.handle('facebook:close', async () => {
+    log('facebook:close chamado');
+    if (facebookWin && !facebookWin.isDestroyed()) {
+      facebookWin.close();
+    }
+    return { ok: true };
+  });
+
+  ipcMain.removeHandler('facebook:navigate');
+  ipcMain.handle('facebook:navigate', async (_, targetUrl) => {
+    log('facebook:navigate para:', targetUrl);
+    if (facebookWin && !facebookWin.isDestroyed()) {
+      facebookWin.loadURL(targetUrl, {
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+      });
+    }
+    return { ok: true };
+  });
+
+  ipcMain.removeHandler('facebook:executeJavaScript');
+  ipcMain.handle('facebook:executeJavaScript', async (_, script) => {
+    log('facebook:executeJavaScript iniciado');
+    if (!facebookWin || facebookWin.isDestroyed()) {
+      throw new Error('Navegador do Facebook não está aberto');
+    }
+    return await facebookWin.webContents.executeJavaScript(script);
+  });
+
+  ipcMain.removeHandler('facebook:isWindowOpen');
+  ipcMain.handle('facebook:isWindowOpen', async () => {
+    return facebookWin && !facebookWin.isDestroyed();
+  });
+
+  ipcMain.removeHandler('facebook:getUrl');
+  ipcMain.handle('facebook:getUrl', async () => {
+    if (facebookWin && !facebookWin.isDestroyed()) {
+      return facebookWin.webContents.getURL();
+    }
+    return '';
+  });
+
+  ipcMain.removeHandler('facebook:goBack');
+  ipcMain.handle('facebook:goBack', async () => {
+    if (facebookWin && !facebookWin.isDestroyed() && facebookWin.webContents.canGoBack()) {
+      facebookWin.webContents.goBack();
+    }
+    return { ok: true };
+  });
+
+  ipcMain.removeHandler('facebook:goForward');
+  ipcMain.handle('facebook:goForward', async () => {
+    if (facebookWin && !facebookWin.isDestroyed() && facebookWin.webContents.canGoForward()) {
+      facebookWin.webContents.goForward();
+    }
+    return { ok: true };
+  });
+
+  ipcMain.removeHandler('facebook:reload');
+  ipcMain.handle('facebook:reload', async () => {
+    if (facebookWin && !facebookWin.isDestroyed()) {
+      facebookWin.webContents.reload();
+    }
+    return { ok: true };
   });
 
   // IPC: coleta em segundo plano

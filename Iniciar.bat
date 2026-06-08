@@ -27,7 +27,7 @@ timeout /t 5 /nobreak >nul
 
 :: [3/3] Electron
 echo  [3/3] Abrindo programa...
-start "" "frontend\node_modules\electron\dist\electron.exe" "frontend" --no-sandbox --disable-gpu-sandbox
+start "" "frontend\node_modules\electron\dist\electron.exe" "frontend"
 
 echo.
 echo  Programa iniciado! Verifique a barra de tarefas.
