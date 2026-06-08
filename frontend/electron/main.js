@@ -1,8 +1,14 @@
-const { app, BrowserWindow, shell, ipcMain, session } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, session, powerSaveBlocker } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
 const { spawn } = require('child_process');
+
+// ─── Impede throttling de timers em segundo plano ────────────────────────────
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 // ─── Configuração ─────────────────────────────────────────────────────────────
 const IS_PACKAGED = app.isPackaged;
@@ -81,6 +87,8 @@ function createWindow(url) {
 
   win.webContents.on('did-finish-load', () => {
     if (!win.isVisible()) { win.show(); win.focus(); }
+    // Desativa throttling do renderer mesmo em segundo plano
+    win.webContents.setBackgroundThrottling(false);
   });
 
   // Fallback show
@@ -195,6 +203,19 @@ app.whenReady().then(() => {
       const cookies = await ses.cookies.get({ domain: '.facebook.com', name: 'c_user' });
       return { loggedIn: cookies.length > 0 };
     } catch { return { loggedIn: false }; }
+  });
+
+  // ─── IPC: controle de coleta em segundo plano ────────────────────────────
+  let psBlockerId = null;
+  ipcMain.removeHandler('scraping:start');
+  ipcMain.handle('scraping:start', () => {
+    if (!psBlockerId) psBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    return { ok: true };
+  });
+  ipcMain.removeHandler('scraping:stop');
+  ipcMain.handle('scraping:stop', () => {
+    if (psBlockerId !== null) { powerSaveBlocker.stop(psBlockerId); psBlockerId = null; }
+    return { ok: true };
   });
 
   // Aguarda o backend subir antes de abrir a janela

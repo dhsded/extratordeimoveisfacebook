@@ -231,11 +231,18 @@ export default function FacebookBrowser() {
     wv.addEventListener('did-navigate', onNav);
     wv.addEventListener('did-navigate-in-page', onNav);
 
+    // Desativa throttling do webview em segundo plano
+    const onReady = () => {
+      try { wv.setAudioMuted(false); } catch (_) {}
+    };
+    wv.addEventListener('dom-ready', onReady);
+
     return () => {
       wv.removeEventListener('did-start-loading', onStart);
       wv.removeEventListener('did-stop-loading', onStop);
       wv.removeEventListener('did-navigate', onNav);
       wv.removeEventListener('did-navigate-in-page', onNav);
+      wv.removeEventListener('dom-ready', onReady);
     };
   }, []);
 
@@ -300,8 +307,11 @@ export default function FacebookBrowser() {
     setIsScraping(true);
     scrapingRef.current = true;
     setScrapedCount(0);
+    // Avisa o processo principal: impede suspensão do PC
+    if (window.electronAPI?.scraping) await window.electronAPI.scraping.start();
     addLog(`🚀 Iniciando coleta no grupo: ${groupId}`, 'info');
     addLog('📖 Clicando em "Ver Mais" e rolando a página...', 'info');
+    addLog('💡 Pode minimizar o programa — a coleta continua em segundo plano.', 'info');
 
     try {
       // Garante que o grupo existe no banco
@@ -341,6 +351,8 @@ export default function FacebookBrowser() {
     } finally {
       setIsScraping(false);
       scrapingRef.current = false;
+      // Libera o bloqueio de suspensão
+      if (window.electronAPI?.scraping) await window.electronAPI.scraping.stop().catch(() => {});
     }
   };
 

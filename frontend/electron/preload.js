@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getCookies:  () => ipcRenderer.invoke('facebook:getCookies'),
     isLoggedIn:  () => ipcRenderer.invoke('facebook:isLoggedIn'),
   },
+  // Controle de coleta em segundo plano
+  scraping: {
+    start: () => ipcRenderer.invoke('scraping:start'),
+    stop:  () => ipcRenderer.invoke('scraping:stop'),
+  },
   platform: process.platform,
   versions: {
     electron: process.versions.electron,
