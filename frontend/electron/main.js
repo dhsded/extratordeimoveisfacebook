@@ -21,9 +21,16 @@ log('=== Electron iniciando ===');
 log('IS_PACKAGED:', app.isPackaged);
 log('Electron:', process.versions.electron);
 
-// ─── Flags para coleta em segundo plano ──────────────────────────────────────
+// ─── Flags para estabilidade e coleta em segundo plano ───────────────────────
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-sandbox');
+app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('disable-software-rasterizer');
+app.commandLine.appendSwitch('in-process-gpu');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('no-sandbox');
+app.commandLine.appendSwitch('disable-dev-shm-usage');
 
 // ─── Configuração ─────────────────────────────────────────────────────────────
 const IS_PACKAGED = app.isPackaged;
