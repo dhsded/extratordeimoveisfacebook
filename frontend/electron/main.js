@@ -142,25 +142,11 @@ function startBackend(userData) {
     API_PORT: '3001',
   };
 
-  // Em dev: verifica se backend já está rodando antes de iniciar outro
-  if (!IS_PACKAGED) {
-    const check = http.get('http://localhost:3001/api/health', (res) => {
-      res.destroy(); // já está rodando, não faz nada
-    });
-    check.on('error', () => {
-      // Backend não está rodando — inicia
-      backendProcess = spawn('node', [backendScript], {
-        cwd: BACKEND_DIR,
-        env,
-        stdio: 'inherit',
-        shell: true,
-      });
-    });
-    check.setTimeout(1500, () => check.destroy());
-    return;
-  }
+  // Em DEV: backend já está rodando externamente (Iniciar.bat / node src/main.js)
+  // Nunca iniciar um segundo processo — causaria EADDRINUSE na porta 3001
+  if (!IS_PACKAGED) return;
 
-  // Em produção: usa o próprio .exe do Electron como runtime Node.js
+  // Em PRODUÇÃO: usa o próprio .exe do Electron como runtime Node.js
   backendProcess = spawn(process.execPath, [backendScript], {
     cwd: process.resourcesPath,
     env,
