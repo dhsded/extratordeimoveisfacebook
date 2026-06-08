@@ -264,10 +264,18 @@ export default function FacebookBrowser() {
       const isOpen = await window.electronAPI.facebook.isWindowOpen();
       setWindowOpen(isOpen);
       if (isOpen) {
-        const currUrl = await window.electronAPI.facebook.getUrl();
-        if (currUrl) {
-          setCurrentUrl(currUrl);
-          setUrl(currUrl);
+        // Se a janela já está aberta, mas o usuário pediu para abrir um link de grupo específico vindo da aba de grupos:
+        if (initialUrl && initialUrl !== 'https://www.facebook.com') {
+          addLog(`🌐 Direcionando navegador para: ${initialUrl}`, 'info');
+          await window.electronAPI.facebook.navigate(initialUrl);
+          setCurrentUrl(initialUrl);
+          setUrl(initialUrl);
+        } else {
+          const currUrl = await window.electronAPI.facebook.getUrl();
+          if (currUrl) {
+            setCurrentUrl(currUrl);
+            setUrl(currUrl);
+          }
         }
       } else {
         // Abre automaticamente se não estiver aberta
@@ -290,6 +298,21 @@ export default function FacebookBrowser() {
       addLog('🌐 Janela do navegador do Facebook foi fechada.', 'warn');
     });
   }, []);
+
+  // Auto-coleta se solicitado vindo da aba de grupos
+  useEffect(() => {
+    if (windowOpen && loggedIn && !isScraping) {
+      const autoCollect = sessionStorage.getItem('fb_auto_collect');
+      if (autoCollect === 'true') {
+        sessionStorage.removeItem('fb_auto_collect');
+        addLog('⏳ Aguardando carregamento completo do grupo para auto-coleta...', 'info');
+        const timer = setTimeout(() => {
+          handleStartScraping();
+        }, 4000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [windowOpen, loggedIn, isScraping]);
 
   // ── Salvar sessão ──────────────────────────────────────────────────────────
   const handleSaveSession = async () => {

@@ -86,6 +86,7 @@ export default function Groups() {
   // Abre o grupo diretamente na aba Facebook (webview) para coleta
   const handleOpenInFacebook = (groupUrl) => {
     sessionStorage.setItem('fb_open_url', groupUrl);
+    sessionStorage.setItem('fb_auto_collect', 'true');
     navigate('/facebook');
   };
 
