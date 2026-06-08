@@ -34,7 +34,6 @@ const BACKEND_DIR = IS_PACKAGED
 
 let win = null;
 let backendProcess = null;
-let facebookWin = null;
 
 // ─── Dados do usuário ─────────────────────────────────────────────────────────
 function prepareUserData() {
@@ -135,14 +134,7 @@ function createWindow(url) {
     return { action: 'deny' };
   });
 
-  win.on('closed', () => {
-    log('Janela fechada');
-    win = null;
-    if (facebookWin && !facebookWin.isDestroyed()) {
-      try { facebookWin.close(); } catch (_) {}
-      facebookWin = null;
-    }
-  });
+  win.on('closed', () => { log('Janela fechada'); win = null; });
 }
 
 // ─── Backend (apenas em produção) ─────────────────────────────────────────────

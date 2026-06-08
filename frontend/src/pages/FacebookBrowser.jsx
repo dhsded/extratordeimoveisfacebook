@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import axios from 'axios';
 
 const isElectron = !!window.electronAPI;
@@ -193,6 +194,8 @@ const ts = () => new Date().toLocaleTimeString('pt-BR', { hour12: false });
 const groupIdFromUrl = (url) => url?.match(/groups\/([^/?]+)/)?.[1];
 
 export default function FacebookBrowser() {
+  const location = useLocation();
+  const webviewRef  = useRef(null);
   const logEndRef   = useRef(null);
   const scrapingRef = useRef(false);
 
@@ -213,7 +216,7 @@ export default function FacebookBrowser() {
   const [scrapedCount, setScrapedCount] = useState(0);
   const [logs, setLogs]             = useState([]);
   const [showLog, setShowLog]       = useState(true);
-  const [windowOpen, setWindowOpen] = useState(false);
+  const [hasOpened, setHasOpened]   = useState(false);
 
   const addLog = useCallback((msg, type = 'info') => {
     setLogs(prev => [...prev.slice(-199), { msg, type, time: ts() }]);
@@ -231,77 +234,63 @@ export default function FacebookBrowser() {
     setLoggedIn(li);
   };
 
-  // Gerenciamento de abertura/fechamento da janela nativa do Facebook
-  const handleOpenWindow = async (targetUrl = null) => {
-    if (!window.electronAPI?.facebook) return;
-    const openUrl = targetUrl || url || 'https://www.facebook.com';
-    addLog(`🌐 Abrindo navegador secundário: ${openUrl}`, 'info');
-    await window.electronAPI.facebook.open(openUrl);
-    setWindowOpen(true);
-  };
-
-  const handleCloseWindow = async () => {
-    if (!window.electronAPI?.facebook) return;
-    addLog('🌐 Fechando navegador secundário...', 'warn');
-    await window.electronAPI.facebook.close();
-    setWindowOpen(false);
-  };
-
-  const handleBringToFront = async () => {
-    if (!window.electronAPI?.facebook) return;
-    await window.electronAPI.facebook.open(currentUrl || url);
-  };
-
-  // Sincroniza estado e eventos da janela nativa
+  // Carrega e gerencia o estado ao acessar a aba Facebook
   useEffect(() => {
-    if (!window.electronAPI?.facebook) {
-      setLoading(false);
-      return;
-    }
-
-    const initWindow = async () => {
-      setLoading(true);
-      const isOpen = await window.electronAPI.facebook.isWindowOpen();
-      setWindowOpen(isOpen);
-      if (isOpen) {
-        // Se a janela já está aberta, mas o usuário pediu para abrir um link de grupo específico vindo da aba de grupos:
-        if (initialUrl && initialUrl !== 'https://www.facebook.com') {
-          addLog(`🌐 Direcionando navegador para: ${initialUrl}`, 'info');
-          await window.electronAPI.facebook.navigate(initialUrl);
-          setCurrentUrl(initialUrl);
-          setUrl(initialUrl);
-        } else {
-          const currUrl = await window.electronAPI.facebook.getUrl();
-          if (currUrl) {
-            setCurrentUrl(currUrl);
-            setUrl(currUrl);
-          }
+    if (location.pathname === '/facebook') {
+      setHasOpened(true);
+      const savedUrl = sessionStorage.getItem('fb_open_url');
+      if (savedUrl) {
+        sessionStorage.removeItem('fb_open_url');
+        addLog(`🌐 Direcionando navegador para o grupo: ${savedUrl}`, 'info');
+        setUrl(savedUrl);
+        setCurrentUrl(savedUrl);
+        if (webviewRef.current) {
+          webviewRef.current.loadURL(savedUrl);
         }
       } else {
-        // Abre automaticamente se não estiver aberta
-        await handleOpenWindow(initialUrl);
+        if (webviewRef.current) {
+          try {
+            const curr = webviewRef.current.getURL();
+            setCurrentUrl(curr);
+            setUrl(curr);
+          } catch (_) {}
+        }
       }
-      setLoading(false);
-      await checkLogin();
-    };
-
-    initWindow();
-
-    window.electronAPI.facebook.onNavigate((navUrl) => {
-      setCurrentUrl(navUrl);
-      setUrl(navUrl);
       checkLogin();
-    });
+    }
+  }, [location.pathname]);
 
-    window.electronAPI.facebook.onClosed(() => {
-      setWindowOpen(false);
-      addLog('🌐 Janela do navegador do Facebook foi fechada.', 'warn');
-    });
-  }, []);
+  // Eventos do webview (vinculados assim que o webview for montado)
+  useEffect(() => {
+    const wv = webviewRef.current;
+    if (!wv) return;
+
+    const onStart = () => setLoading(true);
+    const onStop  = () => { setLoading(false); checkLogin(); };
+    const onNav   = (e) => { setCurrentUrl(e.url); setUrl(e.url); };
+
+    wv.addEventListener('did-start-loading', onStart);
+    wv.addEventListener('did-stop-loading', onStop);
+    wv.addEventListener('did-navigate', onNav);
+    wv.addEventListener('did-navigate-in-page', onNav);
+
+    const onReady = () => {
+      try { wv.setAudioMuted(false); } catch (_) {}
+    };
+    wv.addEventListener('dom-ready', onReady);
+
+    return () => {
+      wv.removeEventListener('did-start-loading', onStart);
+      wv.removeEventListener('did-stop-loading', onStop);
+      wv.removeEventListener('did-navigate', onNav);
+      wv.removeEventListener('did-navigate-in-page', onNav);
+      wv.removeEventListener('dom-ready', onReady);
+    };
+  }, [hasOpened]);
 
   // Auto-coleta se solicitado vindo da aba de grupos
   useEffect(() => {
-    if (windowOpen && loggedIn && !isScraping) {
+    if (location.pathname === '/facebook' && loggedIn && !isScraping) {
       const autoCollect = sessionStorage.getItem('fb_auto_collect');
       if (autoCollect === 'true') {
         sessionStorage.removeItem('fb_auto_collect');
@@ -312,17 +301,16 @@ export default function FacebookBrowser() {
         return () => clearTimeout(timer);
       }
     }
-  }, [windowOpen, loggedIn, isScraping]);
+  }, [location.pathname, loggedIn, isScraping]);
 
   // ── Salvar sessão ──────────────────────────────────────────────────────────
   const handleSaveSession = async () => {
-    if (!window.electronAPI?.facebook) return;
+    if (!window.electronAPI?.facebook || !webviewRef.current) return;
     setSaving(true);
     try {
-      // Pega nome do usuário via JS na janela do Facebook
       let userName = '';
       try {
-        userName = await window.electronAPI.facebook.executeJavaScript(`
+        userName = await webviewRef.current.executeJavaScript(`
           (() => {
             const sel = [
               '[aria-label*="your profile"] span',
@@ -360,41 +348,36 @@ export default function FacebookBrowser() {
   const handleStartScraping = async () => {
     if (isScraping) return;
 
-    const isOpen = await window.electronAPI.facebook.isWindowOpen();
-    if (!isOpen) {
-      addLog('⚠️ Abra a janela do Facebook antes de iniciar a coleta.', 'warn');
+    const wv = webviewRef.current;
+    if (!wv) {
+      addLog('⚠️ Navegador do Facebook não está inicializado.', 'warn');
       return;
     }
 
     const groupId = groupIdFromUrl(currentUrl);
     if (!groupId) {
-      addLog('⚠️ Navegue até um Grupo do Facebook na janela antes de iniciar a coleta.', 'warn');
+      addLog('⚠️ Navegue até um Grupo do Facebook antes de iniciar a coleta.', 'warn');
       return;
     }
 
     setIsScraping(true);
     scrapingRef.current = true;
     setScrapedCount(0);
-    // Avisa o processo principal: impede suspensão do PC
     if (window.electronAPI?.scraping) await window.electronAPI.scraping.start();
     addLog(`🚀 Iniciando coleta no grupo: ${groupId}`, 'info');
     addLog('📖 Clicando em "Ver Mais" e rolando a página...', 'info');
     addLog('💡 Pode minimizar o programa — a coleta continua em segundo plano.', 'info');
 
     try {
-      // Garante que o grupo existe no banco
       const groupRes = await axios.post('/api/groups', {
         url: currentUrl,
         name: groupId,
       }).catch(() => ({ data: { id: null } }));
       const dbGroupId = groupRes.data?.id || groupRes.data?.group?.id;
 
-      // Injeta script de controle de parada
-      await window.electronAPI.facebook.executeJavaScript('window.__scraperStop = false;');
-
-      // Executa o scraper na janela secundária
+      await wv.executeJavaScript('window.__scraperStop = false;');
       addLog('🔍 Extraindo posts da página (aguarde a conclusão)...', 'info');
-      const posts = await window.electronAPI.facebook.executeJavaScript(SCRAPER_SCRIPT);
+      const posts = await wv.executeJavaScript(SCRAPER_SCRIPT);
 
       addLog(`📦 ${posts.length} posts encontrados. Filtrando e salvando...`, 'info');
 
@@ -419,13 +402,12 @@ export default function FacebookBrowser() {
     } finally {
       setIsScraping(false);
       scrapingRef.current = false;
-      // Libera o bloqueio de suspensão
       if (window.electronAPI?.scraping) await window.electronAPI.scraping.stop().catch(() => {});
     }
   };
 
   const handleStopScraping = async () => {
-    try { await window.electronAPI.facebook.executeJavaScript('window.__scraperStop = true;'); } catch (_) {}
+    try { await webviewRef.current?.executeJavaScript('window.__scraperStop = true;'); } catch (_) {}
     scrapingRef.current = false;
     setIsScraping(false);
     addLog('⏹️ Coleta interrompida pelo usuário.', 'warn');
@@ -433,17 +415,15 @@ export default function FacebookBrowser() {
 
   const navigate = (dest) => {
     setUrl(dest);
-    if (windowOpen && window.electronAPI?.facebook) {
-      window.electronAPI.facebook.navigate(dest);
-    }
+    webviewRef.current?.loadURL(dest);
   };
   
   const handleUrlKey = (e) => { if (e.key === 'Enter') navigate(url); };
   const isInGroup = !!groupIdFromUrl(currentUrl);
 
-  const handleGoBack = () => window.electronAPI?.facebook?.goBack();
-  const handleGoForward = () => window.electronAPI?.facebook?.goForward();
-  const handleReload = () => window.electronAPI?.facebook?.reload();
+  const handleGoBack = () => webviewRef.current?.goBack();
+  const handleGoForward = () => webviewRef.current?.goForward();
+  const handleReload = () => webviewRef.current?.reload();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -454,9 +434,9 @@ export default function FacebookBrowser() {
         background: 'var(--bg-card)', borderBottom: '1px solid var(--border)',
         flexShrink: 0, flexWrap: 'wrap',
       }}>
-        <button className="btn btn-secondary btn-sm" onClick={handleGoBack} disabled={!windowOpen}>◀</button>
-        <button className="btn btn-secondary btn-sm" onClick={handleGoForward} disabled={!windowOpen}>▶</button>
-        <button className="btn btn-secondary btn-sm" onClick={handleReload} disabled={!windowOpen}>🔄</button>
+        <button className="btn btn-secondary btn-sm" onClick={handleGoBack}>◀</button>
+        <button className="btn btn-secondary btn-sm" onClick={handleGoForward}>▶</button>
+        <button className="btn btn-secondary btn-sm" onClick={handleReload}>🔄</button>
         <button className="btn btn-secondary btn-sm" onClick={() => navigate('https://www.facebook.com')}>🏠</button>
         <button className="btn btn-secondary btn-sm" onClick={() => navigate('https://www.facebook.com/groups/feed/')}>👥 Grupos</button>
 
@@ -464,19 +444,17 @@ export default function FacebookBrowser() {
           value={url}
           onChange={e => setUrl(e.target.value)}
           onKeyDown={handleUrlKey}
-          disabled={!windowOpen}
           style={{
             flex: 1, minWidth: 200, background: 'var(--bg-elevated)',
             border: '1px solid var(--border)', borderRadius: 8,
             padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13, outline: 'none',
-            opacity: windowOpen ? 1 : 0.5,
           }}
         />
 
         {loading && <span style={{ fontSize: 12, color: 'var(--warning)' }}>⏳</span>}
 
         {/* Login status */}
-        {windowOpen && !loggedIn && (
+        {!loggedIn && (
           <span style={{
             fontSize: 12, color: 'var(--warning)', background: 'rgba(255,200,0,0.1)',
             padding: '3px 8px', borderRadius: 6, whiteSpace: 'nowrap',
@@ -484,7 +462,7 @@ export default function FacebookBrowser() {
         )}
 
         {/* Salvar sessão */}
-        {isElectron && loggedIn && windowOpen && (
+        {isElectron && loggedIn && (
           <button
             className={`btn ${sessionSaved ? 'btn-success' : 'btn-primary'} btn-sm`}
             onClick={handleSaveSession}
@@ -496,7 +474,7 @@ export default function FacebookBrowser() {
         )}
 
         {/* Botão Coletar / Parar */}
-        {isInGroup && windowOpen && (
+        {isInGroup && (
           isScraping ? (
             <button className="btn btn-danger btn-sm" onClick={handleStopScraping}>
               ⏹️ Parar ({scrapedCount})
@@ -523,46 +501,29 @@ export default function FacebookBrowser() {
         </button>
       </div>
 
-      {/* ── Área Principal: Painel Central + Log ─────────────────────────── */}
+      {/* ── Área Principal: Webview + Log ─────────────────────────── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-        {/* Painel Central */}
+        {/* Webview */}
         {isElectron ? (
-          <div style={{
-            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexDirection: 'column', gap: 20, background: 'var(--bg-elevated)',
-            color: 'var(--text-primary)', padding: 40, textAlign: 'center'
-          }}>
-            {windowOpen ? (
-              <>
-                <div style={{ fontSize: 64, animation: 'pulse 2s infinite' }}>🌐</div>
-                <div style={{ fontSize: 20, fontWeight: 700 }}>Navegador do Facebook Ativo</div>
-                <div style={{ fontSize: 14, color: 'var(--text-muted)', maxWidth: 450, lineHeight: 1.5 }}>
-                  Acesse a janela separada do Facebook para navegar e fazer login. 
-                  As opções de coleta e os logs em tempo real estão localizados aqui nesta aba.
-                </div>
-                <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
-                  <button className="btn btn-primary btn-sm" onClick={handleBringToFront}>
-                    🖥️ Trazer Janela para Frente
-                  </button>
-                  <button className="btn btn-danger btn-sm" onClick={handleCloseWindow}>
-                    ❌ Fechar Janela
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 64, opacity: 0.5 }}>🌐</div>
-                <div style={{ fontSize: 20, fontWeight: 700 }}>Navegador do Facebook Oculto</div>
-                <div style={{ fontSize: 14, color: 'var(--text-muted)', maxWidth: 450, lineHeight: 1.5 }}>
-                  A janela separada do Facebook está fechada. Abra-a para navegar e iniciar a coleta automática.
-                </div>
-                <button className="btn btn-primary" onClick={() => handleOpenWindow()} style={{ marginTop: 10 }}>
-                  🌐 Abrir Navegador do Facebook
-                </button>
-              </>
-            )}
-          </div>
+          hasOpened ? (
+            <webview
+              ref={webviewRef}
+              src={initialUrl}
+              partition="persist:facebook"
+              style={{ flex: 1, border: 'none', minWidth: 0 }}
+              useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+              allowpopups="false"
+            />
+          ) : (
+            <div style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexDirection: 'column', gap: 16, color: 'var(--text-muted)',
+            }}>
+              <div style={{ fontSize: 64 }}>🌐</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>Carregando navegador...</div>
+            </div>
+          )
         ) : (
           <div style={{
             flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',

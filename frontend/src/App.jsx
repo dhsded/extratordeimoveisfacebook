@@ -24,6 +24,18 @@ function ElectronNavigator() {
   return null;
 }
 
+function FacebookBrowserWrapper() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isFbRoute = location.pathname === '/facebook';
+
+  return (
+    <div style={{ display: isFbRoute ? 'block' : 'none', height: '100%', width: '100%' }}>
+      <FacebookBrowser />
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -39,8 +51,9 @@ export default function App() {
                 <Route path="/groups" element={<Groups />} />
                 <Route path="/filters" element={<Filters />} />
                 <Route path="/sessions" element={<Sessions />} />
-                <Route path="/facebook" element={<FacebookBrowser />} />
+                <Route path="/facebook" element={<div />} />
               </Routes>
+              <FacebookBrowserWrapper />
             </main>
           </div>
         </BrowserRouter>
