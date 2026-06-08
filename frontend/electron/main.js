@@ -4,11 +4,9 @@ const http = require('http');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
-// ─── Impede throttling de timers em segundo plano ────────────────────────────
+// ─── Flags para manter coleta ativa mesmo em segundo plano ───────────────────
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
-app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 // ─── Configuração ─────────────────────────────────────────────────────────────
 const IS_PACKAGED = app.isPackaged;
@@ -22,25 +20,16 @@ let backendProcess = null;
 // ─── Prepara pasta de dados do usuário ───────────────────────────────────────
 function prepareUserData() {
   const userData = app.getPath('userData');
-
-  // Cria pastas necessárias
-  const dirs = [
-    userData,
-    path.join(userData, 'sessions', 'profile1'),
-  ];
+  const dirs = [userData, path.join(userData, 'sessions', 'profile1')];
   dirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
-  // Copia banco de dados inicial se não existir ainda
   const dbDest = path.join(userData, 'imoveis.db');
   if (!fs.existsSync(dbDest)) {
     const dbSrc = IS_PACKAGED
       ? path.join(process.resourcesPath, 'data', 'imoveis.db')
       : path.join(BACKEND_DIR, 'prisma', 'data', 'imoveis.db');
-    if (fs.existsSync(dbSrc)) {
-      fs.copyFileSync(dbSrc, dbDest);
-    }
+    if (fs.existsSync(dbSrc)) fs.copyFileSync(dbSrc, dbDest);
   }
-
   return userData;
 }
 
@@ -50,17 +39,14 @@ function getAppURL(cb) {
     cb('file://' + path.join(__dirname, '..', 'dist', 'index.html'));
     return;
   }
-  let done = false;
   const req = http.get('http://localhost:5173', (res) => {
     res.destroy();
-    if (!done) { done = true; cb('http://localhost:5173'); }
+    cb('http://localhost:5173');
   });
   req.on('error', () => {
-    if (!done) { done = true; cb('file://' + path.join(__dirname, '..', 'dist', 'index.html')); }
+    cb('file://' + path.join(__dirname, '..', 'dist', 'index.html'));
   });
-  setTimeout(() => {
-    if (!done) { done = true; req.destroy(); cb('file://' + path.join(__dirname, '..', 'dist', 'index.html')); }
-  }, 2000);
+  req.setTimeout(2000, () => { req.destroy(); });
 }
 
 // ─── Janela Principal ─────────────────────────────────────────────────────────
@@ -78,6 +64,7 @@ function createWindow(url) {
       nodeIntegration: false,
       contextIsolation: true,
       webviewTag: true,
+      backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js'),
     },
   });
@@ -86,17 +73,15 @@ function createWindow(url) {
   win.loadURL(url);
 
   win.webContents.on('did-finish-load', () => {
-    if (!win.isVisible()) { win.show(); win.focus(); }
-    // Desativa throttling do renderer mesmo em segundo plano
     win.webContents.setBackgroundThrottling(false);
+    if (!win.isVisible()) { win.show(); win.focus(); }
   });
 
-  // Fallback show
+  // Fallback: mostra a janela após 8s caso did-finish-load não dispare
   setTimeout(() => {
     if (win && !win.isDestroyed() && !win.isVisible()) { win.show(); win.focus(); }
   }, 8000);
 
-  // Bloqueia navegação para URLs externas na janela principal
   win.webContents.on('will-navigate', (event, targetUrl) => {
     const isInternal = targetUrl.startsWith('http://localhost:5173') ||
                        targetUrl.startsWith('file://');
@@ -111,60 +96,37 @@ function createWindow(url) {
     return { action: 'deny' };
   });
 
-  win.webContents.on('render-process-gone', (_, details) => {
-    if (details.reason !== 'killed') {
-      setTimeout(() => { if (win && !win.isDestroyed()) win.reload(); }, 1500);
-    }
-  });
-
   win.on('closed', () => { win = null; });
 }
 
-// ─── Backend (integrado via ELECTRON_RUN_AS_NODE) ─────────────────────────────
+// ─── Backend ──────────────────────────────────────────────────────────────────
 function startBackend(userData) {
-  const backendScript = path.join(BACKEND_DIR, 'src', 'main.js');
+  // Em DEV: backend já roda externamente (Iniciar.bat / node src/main.js)
+  if (!IS_PACKAGED) return;
+
+  const backendScript = path.join(process.resourcesPath, 'src', 'main.js');
   const dbPath        = path.join(userData, 'imoveis.db');
   const sessionsDir   = path.join(userData, 'sessions', 'profile1');
 
-  const env = {
-    ...process.env,
-    // Faz o Electron agir como Node.js puro — sem UI, apenas runtime
-    ELECTRON_RUN_AS_NODE: '1',
-    ELECTRON_NO_ASAR: '1',
-    NODE_ENV: IS_PACKAGED ? 'production' : (process.env.NODE_ENV || 'development'),
-    // Diretório de dados do usuário (gravável mesmo no Program Files)
-    APP_DATA_DIR: userData,
-    // URL do banco de dados SQLite com caminho absoluto
-    DATABASE_URL: `file:${dbPath}`,
-    // Pasta de sessão do Playwright
-    FB_SESSION_DIR: sessionsDir,
-    // Porta da API
-    API_PORT: '3001',
-  };
-
-  // Em DEV: backend já está rodando externamente (Iniciar.bat / node src/main.js)
-  // Nunca iniciar um segundo processo — causaria EADDRINUSE na porta 3001
-  if (!IS_PACKAGED) return;
-
-  // Em PRODUÇÃO: usa o próprio .exe do Electron como runtime Node.js
   backendProcess = spawn(process.execPath, [backendScript], {
     cwd: process.resourcesPath,
-    env,
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      ELECTRON_NO_ASAR: '1',
+      NODE_ENV: 'production',
+      APP_DATA_DIR: userData,
+      DATABASE_URL: `file:${dbPath}`,
+      FB_SESSION_DIR: sessionsDir,
+      API_PORT: '3001',
+    },
     stdio: 'pipe',
     shell: false,
   });
 
-  if (IS_PACKAGED && backendProcess.stderr) {
-    backendProcess.stderr.on('data', d => console.error('[Backend]', d.toString()));
-  }
-
-  backendProcess.on('error', err => {
-    console.error('[Backend] Falha ao iniciar:', err.message);
-  });
-
-  backendProcess.on('exit', (code) => {
-    if (code !== 0) console.error('[Backend] Saiu com código:', code);
-  });
+  backendProcess.stderr?.on('data', d => console.error('[Backend]', d.toString()));
+  backendProcess.on('error', err => console.error('[Backend] Erro:', err.message));
+  backendProcess.on('exit', code => { if (code !== 0) console.error('[Backend] Saiu:', code); });
 }
 
 // ─── App Lifecycle ────────────────────────────────────────────────────────────
@@ -172,7 +134,7 @@ app.whenReady().then(() => {
   const userData = prepareUserData();
   startBackend(userData);
 
-  // ─── IPC handlers (registrados UMA vez aqui, não dentro de createWindow) ──
+  // ── IPC: Facebook cookies ──────────────────────────────────────────────────
   ipcMain.removeHandler('facebook:getCookies');
   ipcMain.handle('facebook:getCookies', async () => {
     try {
@@ -191,7 +153,7 @@ app.whenReady().then(() => {
     } catch { return { loggedIn: false }; }
   });
 
-  // ─── IPC: controle de coleta em segundo plano ────────────────────────────
+  // ── IPC: controle de coleta em segundo plano ───────────────────────────────
   let psBlockerId = null;
   ipcMain.removeHandler('scraping:start');
   ipcMain.handle('scraping:start', () => {
@@ -204,7 +166,7 @@ app.whenReady().then(() => {
     return { ok: true };
   });
 
-  // Aguarda o backend subir antes de abrir a janela
+  // Abre a janela
   const delay = IS_PACKAGED ? 3000 : 0;
   setTimeout(() => {
     getAppURL((url) => createWindow(url));
