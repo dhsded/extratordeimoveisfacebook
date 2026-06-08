@@ -109,23 +109,6 @@ function createWindow(url) {
     }
   });
 
-  // ─── IPC Facebook cookies ───────────────────────────────────────────────────
-  ipcMain.handle('facebook:getCookies', async () => {
-    try {
-      const ses = session.fromPartition('persist:facebook');
-      const cookies = await ses.cookies.get({ domain: '.facebook.com' });
-      return { ok: true, cookies };
-    } catch (e) { return { ok: false, error: e.message }; }
-  });
-
-  ipcMain.handle('facebook:isLoggedIn', async () => {
-    try {
-      const ses = session.fromPartition('persist:facebook');
-      const cookies = await ses.cookies.get({ domain: '.facebook.com', name: 'c_user' });
-      return { loggedIn: cookies.length > 0 };
-    } catch { return { loggedIn: false }; }
-  });
-
   win.on('closed', () => { win = null; });
 }
 
@@ -151,16 +134,29 @@ function startBackend(userData) {
     API_PORT: '3001',
   };
 
-  // Em produção: usa o próprio .exe do Electron como runtime Node.js
-  // Em dev: usa o node do sistema
-  const [exe, args] = IS_PACKAGED
-    ? [process.execPath, [backendScript]]
-    : ['node', [backendScript]];
+  // Em dev: verifica se backend já está rodando antes de iniciar outro
+  if (!IS_PACKAGED) {
+    const check = http.get('http://localhost:3001/api/health', (res) => {
+      res.destroy(); // já está rodando, não faz nada
+    });
+    check.on('error', () => {
+      // Backend não está rodando — inicia
+      backendProcess = spawn('node', [backendScript], {
+        cwd: BACKEND_DIR,
+        env,
+        stdio: 'inherit',
+        shell: true,
+      });
+    });
+    check.setTimeout(1500, () => check.destroy());
+    return;
+  }
 
-  backendProcess = spawn(exe, args, {
-    cwd: IS_PACKAGED ? process.resourcesPath : BACKEND_DIR,
+  // Em produção: usa o próprio .exe do Electron como runtime Node.js
+  backendProcess = spawn(process.execPath, [backendScript], {
+    cwd: process.resourcesPath,
     env,
-    stdio: IS_PACKAGED ? 'pipe' : 'inherit',
+    stdio: 'pipe',
     shell: false,
   });
 
@@ -181,6 +177,25 @@ function startBackend(userData) {
 app.whenReady().then(() => {
   const userData = prepareUserData();
   startBackend(userData);
+
+  // ─── IPC handlers (registrados UMA vez aqui, não dentro de createWindow) ──
+  ipcMain.removeHandler('facebook:getCookies');
+  ipcMain.handle('facebook:getCookies', async () => {
+    try {
+      const ses = session.fromPartition('persist:facebook');
+      const cookies = await ses.cookies.get({ domain: '.facebook.com' });
+      return { ok: true, cookies };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.removeHandler('facebook:isLoggedIn');
+  ipcMain.handle('facebook:isLoggedIn', async () => {
+    try {
+      const ses = session.fromPartition('persist:facebook');
+      const cookies = await ses.cookies.get({ domain: '.facebook.com', name: 'c_user' });
+      return { loggedIn: cookies.length > 0 };
+    } catch { return { loggedIn: false }; }
+  });
 
   // Aguarda o backend subir antes de abrir a janela
   const delay = IS_PACKAGED ? 3000 : 0;
