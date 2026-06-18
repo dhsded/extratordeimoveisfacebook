@@ -78,7 +78,10 @@ export async function humanScroll(page, opts = {}) {
  * @param {number} targetY
  */
 export async function humanMouseMove(page, targetX, targetY) {
-  const startPos = await page.evaluate(() => ({ x: 0, y: 0 }));
+  if (!page._mousePos) {
+    page._mousePos = { x: 100, y: 100 };
+  }
+  const startPos = page._mousePos;
 
   // Ponto de controle da curva bezier (aleatoriza o caminho)
   const cpX = rand(
@@ -101,6 +104,8 @@ export async function humanMouseMove(page, targetX, targetY) {
     await page.mouse.move(x, y);
     await sleep(rand(8, 25));
   }
+
+  page._mousePos = { x: targetX, y: targetY };
 }
 
 /**

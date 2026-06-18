@@ -7,13 +7,16 @@ import { crawlQueue, parseQueue, queuePostParse } from './jobs.js';
 import { prisma } from '../db/client.js';
 import { broadcast } from '../api/server.js';
 import { filterPost } from '../collector/filter.js';
+import { restoreSession } from '../browser/session.js';
+
 
 let browserContext = null;
 
 async function getBrowserContext() {
   if (!browserContext) {
     const sessionDir = process.env.FB_SESSION_DIR || './data/sessions/profile1';
-    browserContext = await launchBrowser({ sessionDir, headless: false });
+    const headless = process.env.HEADLESS !== 'false';
+    browserContext = await launchBrowser({ sessionDir, headless });
   }
   return browserContext;
 }
@@ -29,6 +32,8 @@ crawlQueue.process(1, async (job) => {
 
   try {
     const context = await getBrowserContext();
+    const sessionDir = process.env.FB_SESSION_DIR || './data/sessions/profile1';
+    await restoreSession(context, sessionDir);
     const page = await newPage(context);
     let postCount = 0;
 

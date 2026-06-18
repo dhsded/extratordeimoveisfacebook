@@ -20,7 +20,6 @@ const SCRAPER_SCRIPT = `
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // Distribuição gaussiana (Box-Muller) — muito mais realista que rand()
-  // Humanos tendem a se concentrar em torno de um valor médio com caudas
   const gaussian = (mean, stdDev) => {
     let u, v;
     do {
@@ -51,20 +50,107 @@ const SCRAPER_SCRIPT = `
     await sleep(Math.max(50, Math.round(delay)));
   };
 
-  // Clique humano: hesita, mexe o cursor (mouseover), clica
+  // Posição global do cursor simulado para evitar pulos irreais
+  window.__simulatedMousePos = window.__simulatedMousePos || {
+    x: Math.round(window.innerWidth / 2),
+    y: Math.round(window.innerHeight / 2)
+  };
+
+  // Despacha eventos de mouse com coordenadas de cliente e tela válidas
+  const dispatchMouseEvent = (type, el, x, y, extra = {}) => {
+    try {
+      const clientX = x - window.scrollX;
+      const clientY = y - window.scrollY;
+
+      const evt = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: clientX,
+        clientY: clientY,
+        screenX: clientX + window.screenX,
+        screenY: clientY + window.screenY,
+        ...extra
+      });
+      el.dispatchEvent(evt);
+    } catch (e) {}
+  };
+
+  // Movimenta o cursor até as coordenadas alvo usando curvas Bezier e jitter
+  const humanMouseMoveTo = async (el, targetX, targetY) => {
+    const startX = window.__simulatedMousePos.x;
+    const startY = window.__simulatedMousePos.y;
+    const distance = Math.hypot(targetX - startX, targetY - startY);
+    if (distance < 5) return;
+
+    // Ajusta passos com base na distância
+    const baseSteps = Math.max(10, Math.min(45, Math.floor(distance / 15)));
+    const steps = Math.round(baseSteps * (0.8 + Math.random() * 0.4));
+
+    // Desvio Bezier quadrático aleatório para trajetórias mais orgânicas
+    const dev = (Math.random() - 0.5) * (distance * 0.25);
+    const midX = (startX + targetX) / 2;
+    const midY = (startY + targetY) / 2;
+    const angle = Math.atan2(targetY - startY, targetX - startX) + Math.PI / 2;
+    const ctrlX = midX + Math.cos(angle) * dev;
+    const ctrlY = midY + Math.sin(angle) * dev;
+
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+
+      // Cálculo da curva Bezier quadrática
+      let x = (1 - t) * (1 - t) * startX + 2 * (1 - t) * t * ctrlX + t * t * targetX;
+      let y = (1 - t) * (1 - t) * startY + 2 * (1 - t) * t * ctrlY + t * t * targetY;
+
+      // Jitter/tremor da mão humana que reduz conforme se aproxima do final
+      const jitterFactor = Math.sin(t * Math.PI) * 1.5;
+      x += (Math.random() - 0.5) * jitterFactor;
+      y += (Math.random() - 0.5) * jitterFactor;
+
+      window.__simulatedMousePos = { x: Math.round(x), y: Math.round(y) };
+      dispatchMouseEvent('mousemove', el, x, y);
+
+      // Desaceleração de Fitts (movimento fica mais preciso e lento no fim)
+      const isNearEnd = t > 0.8;
+      const stepDelay = isNearEnd
+        ? gaussian(22, 6) * SESSION_PACE
+        : gaussian(12, 4) * SESSION_PACE;
+
+      await sleep(Math.max(5, Math.round(stepDelay)));
+    }
+  };
+
+  // Clique humano com coordenadas internas do elemento e tempo de sustentação
   const humanClick = async (el) => {
+    if (!el) return;
     await humanDelay(250, 100, 'pre-click');
     try {
-      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-      await humanDelay(120, 60, 'hover');
-      // 12% de chance de mover o mouse "ao redor" antes de clicar
-      if (Math.random() < 0.12) {
-        el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
-        await humanDelay(180, 80, 'adjust');
-      }
+      const rect = el.getBoundingClientRect();
+      // Ponto de clique aleatório com margem interna de segurança
+      const padding = 3;
+      const clickX = window.scrollX + rect.left + padding + Math.random() * (rect.width - 2 * padding);
+      const clickY = window.scrollY + rect.top + padding + Math.random() * (rect.height - 2 * padding);
+
+      // Move mouse até o ponto de clique
+      await humanMouseMoveTo(el, clickX, clickY);
+      await humanDelay(100, 40, 'hover');
+
+      // Emite mouseover e mouseenter
+      dispatchMouseEvent('mouseover', el, clickX, clickY);
+      dispatchMouseEvent('mouseenter', el, clickX, clickY);
+
+      // Mousedown (segura o clique)
+      dispatchMouseEvent('mousedown', el, clickX, clickY, { buttons: 1 });
+
+      // Duração física do clique (tempo pressionado de 50-130ms)
+      const holdTime = gaussian(95, 25);
+      await sleep(Math.max(40, Math.round(holdTime)));
+
+      // Mouseup e acionamento de clique
+      dispatchMouseEvent('mouseup', el, clickX, clickY, { buttons: 1 });
       el.click();
     } catch(e) {}
-    await humanDelay(80, 40, 'post-click');
+    await humanDelay(120, 50, 'post-click');
   };
 
   // Scroll suave com aceleração/desaceleração variável
@@ -74,17 +160,17 @@ const SCRAPER_SCRIPT = `
     const stepDist = distance / clampedSteps;
 
     for (let i = 0; i < clampedSteps; i++) {
-      // Easing: acelera no início, desacelera no fim (como roda do mouse)
+      // Easing senoidal (acelera no meio, para gradualmente)
       const progress = i / clampedSteps;
-      const easing = Math.sin(progress * Math.PI); // 0→1→0
+      const easing = Math.sin(progress * Math.PI);
       const speedFactor = 0.5 + easing * 1.5;
 
-      const jitter = gaussian(0, 25); // variação por passo
+      const jitter = gaussian(0, 25);
       window.scrollBy(0, (stepDist + jitter) * speedFactor);
       await sleep(Math.max(20, Math.round(gaussian(70, 30) * SESSION_PACE)));
     }
 
-    // Pausa de "leitura" após scroll — o quanto o usuário lê antes de continuar
+    // Pausa de leitura após o scroll
     await humanDelay(650, 280, 'read-pause');
   };
 
@@ -101,7 +187,6 @@ const SCRAPER_SCRIPT = `
       });
 
     for (const btn of btns) {
-      // Cada botão tem seu próprio timing (não é previsível)
       await humanClick(btn);
     }
     return btns.length;
@@ -151,24 +236,50 @@ const SCRAPER_SCRIPT = `
     return batch;
   };
 
-  // 3. Loop principal — comportamento de leitura real
-  const MAX_SCROLLS = 25;
+  // 3. Loop principal — comportamento de leitura real profundo
+  const MAX_SCROLLS = 250; // Aumento expressivo para cobrir o grupo de forma profunda
   let scrolls = 0;
+  let noNewPostsScrolls = 0;
 
-  // Pausa inicial — simula o usuário orientando na página (tempo variável!)
+  // Pausa inicial de ambientação
   await humanDelay(1400, 600, 'page-load');
 
   while (scrolls < MAX_SCROLLS) {
     // Expande textos
     await clickSeeMore();
-    await humanDelay(1200, 400, 'after-expand'); // aguarda renderização
+    await humanDelay(1200, 400, 'after-expand');
 
     // Extrai
     const batch = extractPosts();
-    batch.forEach(p => results.push(p));
+    if (batch.length === 0) {
+      noNewPostsScrolls++;
+    } else {
+      noNewPostsScrolls = 0;
+      batch.forEach(p => results.push(p));
+    }
     window.__scraperProgress = { scrolls, total: results.length };
 
     if (window.__scraperStop) break;
+
+    // Fim dinâmico precoce: se após 12 rolagens nenhum novo post for extraído, encerra
+    if (noNewPostsScrolls >= 12) {
+      break;
+    }
+
+    // 20% de chance de simular atenção/leitura (mover cursor sobre posts visíveis com pausas curtas)
+    if (Math.random() < 0.20) {
+      const articles = Array.from(document.querySelectorAll('[role="article"]'));
+      if (articles.length > 0) {
+        const randomArticle = articles[Math.floor(Math.random() * articles.length)];
+        const rect = randomArticle.getBoundingClientRect();
+        if (rect.top > 0 && rect.top < window.innerHeight) {
+          const hoverX = window.scrollX + rect.left + rect.width * gaussian(0.5, 0.15);
+          const hoverY = window.scrollY + rect.top + rect.height * gaussian(0.3, 0.1);
+          await humanMouseMoveTo(randomArticle, hoverX, hoverY);
+          await humanDelay(2200, 800, 'hover-reading');
+        }
+      }
+    }
 
     // 15% de chance de scroll para CIMA (releitura — comportamento humano)
     if (Math.random() < 0.15) {
@@ -180,7 +291,7 @@ const SCRAPER_SCRIPT = `
     const scrollDist = window.innerHeight * gaussian(1.8, 0.6);
     await humanScroll(Math.max(200, scrollDist));
 
-    // Pausa entre scrolls com distribuição realista
+    // Pausa entre scrolls
     await humanDelay(1800, 700, 'between-scrolls');
     scrolls++;
   }
@@ -199,14 +310,13 @@ export default function FacebookBrowser() {
   const logEndRef   = useRef(null);
   const scrapingRef = useRef(false);
 
-  // Lê URL enviada pela página de Grupos (via sessionStorage)
-  const initialUrl = (() => {
+  // Lê URL enviada pela página de Grupos (via sessionStorage) de forma segura
+  const [initialWebviewUrl] = useState(() => {
     const saved = sessionStorage.getItem('fb_open_url');
-    if (saved) { sessionStorage.removeItem('fb_open_url'); return saved; }
-    return 'https://www.facebook.com';
-  })();
+    return saved || 'https://www.facebook.com';
+  });
 
-  const [url, setUrl]               = useState(initialUrl);
+  const [url, setUrl]               = useState(initialWebviewUrl);
   const [currentUrl, setCurrentUrl] = useState('');
   const [loading, setLoading]       = useState(true);
   const [loggedIn, setLoggedIn]     = useState(false);
@@ -509,7 +619,7 @@ export default function FacebookBrowser() {
           hasOpened ? (
             <webview
               ref={webviewRef}
-              src={initialUrl}
+              src={initialWebviewUrl}
               partition="persist:facebook"
               style={{ flex: 1, border: 'none', minWidth: 0 }}
               useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"

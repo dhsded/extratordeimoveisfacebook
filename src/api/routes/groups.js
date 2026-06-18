@@ -41,10 +41,9 @@ router.post('/', async (req, res) => {
       create: { url: cleanUrl, status: 'idle' },
     });
 
-    // Enfileira crawling
-    await queueGroupCrawl(group.id, group.url);
-
-    res.json({ group, message: 'Grupo adicionado e coleta iniciada!' });
+    // Apenas cria/recupera o grupo no banco de dados.
+    // A coleta será feita via webview no frontend ou ativada sob demanda, sem enfileirar crawl visível automaticamente.
+    res.json({ group, message: 'Grupo adicionado com sucesso!' });
   } catch (err) {
     console.error('[API/groups] POST error:', err);
     res.status(500).json({ error: err.message });
